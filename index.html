@@ -59,15 +59,15 @@ function money(n) { return '$ ' + Math.round(n).toString().replace(/\B(?=(\d{3})
 
 /* ---------- monde ---------- */
 var T = 64, NB = 7, N = NB * 8, WORLD = N * T;
-var G_ROAD = 0, G_WALK = 1, G_BLD = 2, G_GRASS = 3, G_TREE = 4, G_LOT = 5;
+var G_ROAD = 0, G_WALK = 1, G_BLD = 2, G_GRASS = 3, G_TREE = 4, G_LOT = 5, G_WATER = 6;
 var map = new Uint8Array(N * N), tileH = new Float32Array(N * N);
 var detail = new Uint8Array(N * N);
-var buildings = [], lotSpots = [], walkSpots = [];
+var buildings = [], lotSpots = [], walkSpots = [], grassSpots = [], ponds = [];
 var GARAGE = { x: 0, y: 0 }, BANK = { x: 0, y: 0 }, HOSPITAL = { x: 0, y: 0 };
 var ROOFS = ['#8a5a44', '#6d7a8a', '#9a8f7c', '#5f6f63', '#7a5f7a', '#a0675a', '#6a7d96', '#8c8c8c'];
 
 function tileAt(tx, ty) { if (tx < 0 || ty < 0 || tx >= N || ty >= N) return G_BLD; return map[ty * N + tx]; }
-function solidTile(t) { return t === G_BLD || t === G_TREE; }
+function solidTile(t) { return t === G_BLD || t === G_TREE || t === G_WATER; }
 
 function genMap() {
   var R = mulberry(20261121), tx, ty, bx, by;
@@ -100,7 +100,9 @@ function genMap() {
       });
       if (role === 'bank') { BANK.x = (ox + 2) * T; BANK.y = (by * 8 + 7.5) * T; }
     } else if (role === 'park') {
-      for (j = 0; j < 4; j++) for (i = 0; i < 4; i++) map[(oy + j) * N + ox + i] = (R() < 0.28 && !((i === 1 || i === 2) && (j === 1 || j === 2))) ? G_TREE : G_GRASS;
+      var pond = R() < 0.6;
+      for (j = 0; j < 4; j++) for (i = 0; i < 4; i++) { var mid = (i === 1 || i === 2) && (j === 1 || j === 2); map[(oy + j) * N + ox + i] = mid ? (pond ? G_WATER : G_GRASS) : (R() < 0.28 ? G_TREE : G_GRASS); }
+      if (pond) ponds.push({ x: (ox + 2) * T, y: (oy + 2) * T, r: 60 });
     } else if (role === 'lot' || role === 'garage') {
       for (j = 0; j < 4; j++) for (i = 0; i < 4; i++) {
         map[(oy + j) * N + ox + i] = G_LOT;
@@ -111,7 +113,7 @@ function genMap() {
       if (bx === 3 && by === 3) { HOSPITAL.x = (ox + 2) * T; HOSPITAL.y = (oy + 2) * T; for (j = 0; j < 4; j++) for (i = 0; i < 4; i++) detail[(oy + j) * N + ox + i] = 255; }
     }
   }
-  for (ty = 0; ty < N; ty++) for (tx = 0; tx < N; tx++) if (map[ty * N + tx] === G_WALK) walkSpots.push({ x: (tx + 0.5) * T, y: (ty + 0.5) * T });
+  for (ty = 0; ty < N; ty++) for (tx = 0; tx < N; tx++) { if (map[ty * N + tx] === G_WALK) walkSpots.push({ x: (tx + 0.5) * T, y: (ty + 0.5) * T }); if (map[ty * N + tx] === G_GRASS) grassSpots.push({ x: (tx + 0.5) * T, y: (ty + 0.5) * T }); }
 }
 genMap();
 
@@ -119,7 +121,7 @@ genMap();
 var mini = document.createElement('canvas'); mini.width = mini.height = N * 4;
 (function () {
   var m = mini.getContext('2d');
-  var col = { 0: '#2e3036', 1: '#8d8d88', 2: '#566379', 3: '#3d6b3a', 4: '#2f5a2f', 5: '#55575c' };
+  var col = { 0: '#2e3036', 1: '#8d8d88', 2: '#566379', 3: '#3d6b3a', 4: '#2f5a2f', 5: '#55575c', 6: '#2f6f9a' };
   for (var ty = 0; ty < N; ty++) for (var tx = 0; tx < N; tx++) { m.fillStyle = col[map[ty * N + tx]]; m.fillRect(tx * 4, ty * 4, 4, 4); }
   buildings.forEach(function (b) { if (b.bank) { m.fillStyle = '#e5c766'; m.fillRect(b.x / T * 4, b.y / T * 4, b.w / T * 4, b.h / T * 4); } });
   m.fillStyle = '#e6e6e6'; m.fillRect(HOSPITAL.x / T * 4 - 6, HOSPITAL.y / T * 4 - 2, 12, 4); m.fillRect(HOSPITAL.x / T * 4 - 2, HOSPITAL.y / T * 4 - 6, 4, 12);
@@ -574,6 +576,158 @@ function movePed(p, mx, my) {
   else if (pedOk(p.x, ny)) p.y = ny;
 }
 
+/* ---------- animaux : chiens, chats, pigeons, canards ---------- */
+var animals = [], barkT = 0, chirpT = 0;
+var DOGC = ['#8a5a32', '#2a2420', '#d9c6a0', '#6b6b6b', '#b07a3c', '#f0ece2'], CATC = ['#1c1c1e', '#d98a3a', '#8a8a8e', '#f0ece4', '#6b4a32'];
+function animalOk(x, y) { var t = tileAt(Math.floor(x / T), Math.floor(y / T)); return t === G_WALK || t === G_GRASS || t === G_LOT; }
+function spotNear(minD, maxD, list) { for (var k = 0; k < 20; k++) { var s = pick(list), d = dist(s.x, s.y, P.x, P.y); if (d >= minD && d <= maxD) return s; } return null; }
+function countA(kind) { var n = 0; for (var i = 0; i < animals.length; i++) if (animals[i].kind === kind) n++; return n; }
+function manageAnimals(dt) {
+  for (var i = animals.length - 1; i >= 0; i--) { var a = animals[i]; var ref = a.kind === 'duck' ? a.pond : a; if (dist(ref.x, ref.y !== undefined ? ref.y : ref.z, P.x, P.y) > 1350) animals.splice(i, 1); }
+  if (countA('dog') < 6 && Math.random() < dt * 0.8) {
+    var owner = null;
+    if (Math.random() < 0.6) for (var k = 0; k < 10; k++) { var p = pick(peds); if (p && p.state === 'walk' && !p.dog) { var d = dist(p.x, p.y, P.x, P.y); if (d > 280 && d < 900) { owner = p; break; } } }
+    var s = owner ? { x: owner.x, y: owner.y } : spotNear(300, 900, Math.random() < 0.5 ? grassSpots : walkSpots);
+    if (s) { var dg = { kind: 'dog', x: s.x + 6, y: s.y + 6, a: rnd(0, TAU), sp: 0, st: 'walk', t: rnd(1, 3), ph: 0, col: pick(DOGC), sz: rnd(0.75, 1.25), owner: owner }; if (owner) { owner.dog = dg; owner.sp = 30; } animals.push(dg); }
+  }
+  if (countA('cat') < 5 && Math.random() < dt * 0.6) { var s2 = spotNear(300, 900, Math.random() < 0.5 ? grassSpots : walkSpots); if (s2) animals.push({ kind: 'cat', x: s2.x, y: s2.y, a: rnd(0, TAU), sp: 0, st: 'sit', t: rnd(2, 6), ph: 0, col: pick(CATC), sz: rnd(0.85, 1.1) }); }
+  if (countA('bird') < 22 && Math.random() < dt * 0.7) {
+    var s3 = spotNear(250, 800, Math.random() < 0.6 ? grassSpots : walkSpots);
+    if (s3) { var n = ri(4, 7); for (var b = 0; b < n; b++) animals.push({ kind: 'bird', x: s3.x + rnd(-24, 24), y: s3.y + rnd(-24, 24), a: rnd(0, TAU), h: 0, vh: 0, st: 'ground', t: rnd(0.3, 1.5), ph: rnd(0, 6), sp: 0, col: Math.random() < 0.15 ? '#e8e6e0' : '#6d7078' }); }
+  }
+  ponds.forEach(function (pd) {
+    if (dist(pd.x, pd.y, P.x, P.y) > 950) return;
+    var n2c = 0; animals.forEach(function (a) { if (a.pond === pd) n2c++; });
+    if (n2c < 3) { var an = rnd(0, TAU), rr = rnd(0, pd.r - 18); animals.push({ kind: 'duck', pond: pd, x: pd.x + Math.cos(an) * rr, y: pd.y + Math.sin(an) * rr, a: rnd(0, TAU), t: rnd(1, 4), ph: rnd(0, 6), male: Math.random() < 0.5 }); }
+  });
+}
+function threat(a, rad) {
+  if (dist(a.x, a.y, P.x, P.y) < rad && (P.car ? P.car.speed > 20 : true)) return [P.x, P.y];
+  for (var i = 0; i < cars.length; i++) { var c = cars[i]; if (c.speed > 40 && Math.abs(c.x - a.x) < rad * 1.6 && Math.abs(c.y - a.y) < rad * 1.6) return [c.x, c.y]; }
+  return null;
+}
+function stepA(a, sp, dt) {
+  var nx = a.x + Math.cos(a.a) * sp * dt, ny = a.y + Math.sin(a.a) * sp * dt;
+  if (animalOk(nx, ny)) { a.x = nx; a.y = ny; return true; }
+  a.a += rnd(1.2, 2.6); return false;
+}
+function updateAnimals(dt) {
+  manageAnimals(dt); barkT -= dt; chirpT -= dt;
+  for (var i = 0; i < animals.length; i++) {
+    var a = animals[i], th;
+    if (a.kind === 'dog') {
+      if (a.owner && (peds.indexOf(a.owner) < 0 || a.owner.state === 'down')) { if (a.owner) a.owner.dog = null; a.owner = null; a.st = 'run'; a.t = 2; }
+      th = threat(a, 70);
+      if (th && !a.owner) { a.st = 'run'; a.t = 1.5; a.a = Math.atan2(a.y - th[1], a.x - th[0]); }
+      if (a.owner) {
+        var o = a.owner, tx = o.x - Math.cos(o.a) * 12 - Math.sin(o.a) * 8, ty = o.y - Math.sin(o.a) * 12 + Math.cos(o.a) * 8, d = dist(a.x, a.y, tx, ty);
+        a.a = d > 2 ? Math.atan2(ty - a.y, tx - a.x) : o.a; a.sp = d > 40 ? 110 : d > 6 ? 45 : 0;
+        a.x += Math.cos(a.a) * a.sp * dt; a.y += Math.sin(a.a) * a.sp * dt; if (d > 120) { a.x = tx; a.y = ty; }
+      } else {
+        a.t -= dt;
+        if (a.t <= 0) { var r = Math.random(); a.st = r < 0.45 ? 'walk' : r < 0.75 ? 'sniff' : 'run'; a.t = rnd(1, 3.5); if (a.st !== 'sniff') a.a += rnd(-1.5, 1.5); }
+        a.sp = a.st === 'run' ? 130 : a.st === 'walk' ? 40 : 0; if (a.sp) stepA(a, a.sp, dt);
+      }
+      a.ph += dt * (6 + a.sp * 0.12);
+      if (barkT <= 0 && dist(a.x, a.y, P.x, P.y) < 110 && Math.random() < dt * 0.5) { barkT = 2.5; Snd.noise(0.07, 0.12, 1100); setTimeout(function () { Snd.noise(0.07, 0.1, 1000); }, 160); }
+    } else if (a.kind === 'cat') {
+      th = threat(a, 85);
+      if (th) { a.st = 'flee'; a.t = 2; a.a = Math.atan2(a.y - th[1], a.x - th[0]) + rnd(-0.4, 0.4); }
+      a.t -= dt;
+      if (a.t <= 0) { if (a.st === 'sit') { a.st = 'walk'; a.t = rnd(2, 5); a.a += rnd(-1.5, 1.5); } else { a.st = 'sit'; a.t = rnd(3, 8); } }
+      a.sp = a.st === 'flee' ? 150 : a.st === 'walk' ? 26 : 0; if (a.sp) stepA(a, a.sp, dt);
+      a.ph += dt * (5 + a.sp * 0.12);
+    } else if (a.kind === 'bird') {
+      a.ph += dt * 10;
+      if (a.st === 'ground') {
+        th = threat(a, 75);
+        if (!th) for (var j = 0; j < peds.length; j++) { var p = peds[j]; if (p.state === 'flee' && Math.abs(p.x - a.x) < 30 && Math.abs(p.y - a.y) < 30) { th = [p.x, p.y]; break; } }
+        if (th) { a.st = 'fly'; a.t = rnd(2.5, 4); a.a = Math.atan2(a.y - th[1], a.x - th[0]) + rnd(-0.6, 0.6); a.vh = rnd(55, 80); if (chirpT <= 0) { chirpT = 0.6; Snd.tone(2600, 3400, 0.07, 0.03, 'sine'); } }
+        else { a.t -= dt; if (a.t <= 0) { a.a += rnd(-2, 2); a.t = rnd(0.4, 1.6); a.hop = 0.25; } if (a.hop > 0) { a.hop -= dt; stepA(a, 30, dt); } }
+      } else if (a.st === 'fly') {
+        a.t -= dt; a.h = Math.min(70, a.h + a.vh * dt); a.x += Math.cos(a.a) * 120 * dt; a.y += Math.sin(a.a) * 120 * dt; a.a += Math.sin(time * 2 + i) * 0.6 * dt;
+        if (a.t <= 0) { var s = null; for (var k = 0; k < 12 && !s; k++) { var c2 = pick(Math.random() < 0.6 ? grassSpots : walkSpots); var d2 = dist(c2.x, c2.y, a.x, a.y); if (d2 > 100 && d2 < 380) s = c2; } if (s) { a.st = 'land'; a.tx = s.x + rnd(-20, 20); a.ty = s.y + rnd(-20, 20); } else a.t = 1; }
+      } else {
+        var dl = dist(a.x, a.y, a.tx, a.ty); a.a = Math.atan2(a.ty - a.y, a.tx - a.x);
+        var v = Math.min(110, dl * 1.5 + 20); a.x += Math.cos(a.a) * v * dt; a.y += Math.sin(a.a) * v * dt; a.h = Math.max(0, Math.min(a.h, dl * 0.35));
+        if (dl < 4 || a.h <= 0.1) { a.st = 'ground'; a.h = 0; a.t = rnd(0.5, 2); if (!animalOk(a.x, a.y)) { a.x = a.tx; a.y = a.ty; } }
+      }
+    } else if (a.kind === 'duck') {
+      var pd = a.pond; a.t -= dt; a.ph += dt * 2;
+      if (a.t <= 0) { a.a += rnd(-1.4, 1.4); a.t = rnd(1.5, 4); }
+      var dc = dist(a.x, a.y, pd.x, pd.y); if (dc > pd.r - 14) a.a = Math.atan2(pd.y - a.y, pd.x - a.x) + rnd(-0.5, 0.5);
+      if (dist(a.x, a.y, P.x, P.y) < 90 && !P.car) a.a = Math.atan2(a.y - P.y, a.x - P.x);
+      a.x += Math.cos(a.a) * 13 * dt; a.y += Math.sin(a.a) * 13 * dt;
+    }
+    if (a.kind !== 'duck' && a.kind !== 'bird' && !P.car) { var dp = dist(a.x, a.y, P.x, P.y); if (dp < 15 && dp > 0.01) { var nx = a.x + (a.x - P.x) / dp * (15 - dp), ny = a.y + (a.y - P.y) / dp * (15 - dp); if (animalOk(nx, ny)) { a.x = nx; a.y = ny; } } }
+  }
+}
+/* rendu des animaux */
+function addDog(a) {
+  var s = a.sz, co = Math.cos(a.a), si = Math.sin(a.a), x = a.x, z = a.y, g = groundY(x, z), col = C(a.col), dk = Cm(col, 0.6), mv = a.sp > 1 ? Math.min(1, a.sp / 60) : 0;
+  function T(lx, ly, lz) { return [x + lx * co - lz * si, g + ly, z + lx * si + lz * co]; }
+  box(Bt, x, g + 0.1, z, 16 * s, 0.1, 9 * s, a.a, [0, 0, 0], 0.35, 0);
+  var b = T(0, 7.4 * s, 0); sphere(Bo, b[0], b[1], b[2], 6.6 * s, 3.4 * s, 3.2 * s, a.a, col, 7, 4);
+  for (var l = 0; l < 4; l++) {
+    var fx = l < 2 ? 4.2 : -4.2, fz = (l & 1 ? 2 : -2) * s, sw = Math.sin(a.ph + (l === 0 || l === 3 ? 0 : Math.PI)) * 2.6 * s * mv;
+    var h0 = T(fx * s, 6.2 * s, fz), f0 = T(fx * s + sw, 0.4, fz); limb(Bo, h0[0], h0[1], h0[2], f0[0], f0[1], f0[2], 1.1 * s, 0.85 * s, col);
+  }
+  var sn = a.st === 'sniff' ? -3 : 0;
+  var hd = T(7.6 * s, (10.4 + sn) * s, 0); sphere(Bo, hd[0], hd[1], hd[2], 2.9 * s, 2.7 * s, 2.6 * s, a.a, col, 6, 4);
+  var mz = T(10.4 * s, (9.6 + sn) * s, 0); sphere(Bo, mz[0], mz[1], mz[2], 1.9 * s, 1.3 * s, 1.4 * s, a.a, dk, 5, 3);
+  var ns = T(12.1 * s, (9.9 + sn) * s, 0); box(Bo, ns[0], ns[1] - 0.4, ns[2], 0.9, 0.9, 1.1, a.a, DARK, 1, 0);
+  var e1 = T(6.8 * s, (12.2 + sn) * s, 2 * s), e2 = T(6.8 * s, (12.2 + sn) * s, -2 * s), e1b = T(6.2 * s, (9.8 + sn) * s, 2.8 * s), e2b = T(6.2 * s, (9.8 + sn) * s, -2.8 * s);
+  limb(Bo, e1[0], e1[1], e1[2], e1b[0], e1b[1], e1b[2], 1.1 * s, 0.6 * s, dk); limb(Bo, e2[0], e2[1], e2[2], e2b[0], e2b[1], e2b[2], 1.1 * s, 0.6 * s, dk);
+  var wag = Math.sin(time * (a.owner || a.st === 'run' ? 16 : 7)) * 2.4 * s, t0 = T(-6.2 * s, 8.6 * s, 0), t1 = T(-10 * s, 12 * s, wag);
+  limb(Bo, t0[0], t0[1], t0[2], t1[0], t1[1], t1[2], 0.9 * s, 0.45 * s, col);
+  if (a.owner) { var o = a.owner, hx = o.x + Math.cos(o.a + 1.6) * 5, hz = o.y + Math.sin(o.a + 1.6) * 5, nk = T(5.5 * s, 9 * s, 0); limb(Bo, nk[0], nk[1], nk[2], hx, groundY(o.x, o.y) + 9, hz, 0.18, 0.18, [0.85, 0.15, 0.15]); }
+}
+function addCat(a) {
+  var s = a.sz, co = Math.cos(a.a), si = Math.sin(a.a), x = a.x, z = a.y, g = groundY(x, z), col = C(a.col), sit = a.st === 'sit', mv = a.sp > 1 ? 1 : 0;
+  function T(lx, ly, lz) { return [x + lx * co - lz * si, g + ly, z + lx * si + lz * co]; }
+  box(Bt, x, g + 0.1, z, 11 * s, 0.1, 6 * s, a.a, [0, 0, 0], 0.3, 0);
+  var hy;
+  if (sit) {
+    var b = T(-1, 3.4 * s, 0); sphere(Bo, b[0], b[1], b[2], 3.6 * s, 3.4 * s, 2.6 * s, a.a, col, 6, 4); hy = 7.6;
+    var t0 = T(-3.5 * s, 0.9, 0), t1 = T(-1 * s, 0.9, 4.4 * s); limb(Bo, t0[0], t0[1], t0[2], t1[0], t1[1], t1[2], 0.7 * s, 0.5 * s, col);
+    var f1 = T(2 * s, 0.3, 1.1 * s), f2 = T(2 * s, 0.3, -1.1 * s); sphere(Bo, f1[0], f1[1] + 0.6, f1[2], 1.1 * s, 0.7, 0.8 * s, a.a, col, 4, 2); sphere(Bo, f2[0], f2[1] + 0.6, f2[2], 1.1 * s, 0.7, 0.8 * s, a.a, col, 4, 2);
+  } else {
+    var b2 = T(0, 5 * s, 0); sphere(Bo, b2[0], b2[1], b2[2], 5 * s, 2.3 * s, 2.1 * s, a.a, col, 6, 4); hy = 6.4;
+    for (var l = 0; l < 4; l++) { var fx = l < 2 ? 3.2 : -3.2, fz = (l & 1 ? 1.4 : -1.4) * s, sw = Math.sin(a.ph + (l === 0 || l === 3 ? 0 : Math.PI)) * 2 * s * mv; var h0 = T(fx * s, 4.2 * s, fz), f0 = T(fx * s + sw, 0.3, fz); limb(Bo, h0[0], h0[1], h0[2], f0[0], f0[1], f0[2], 0.7 * s, 0.55 * s, col); }
+    var ta = T(-4.8 * s, 5.6 * s, 0), tb = T(-7.5 * s, 9 * s, Math.sin(time * 3) * 1.2), tc = T(-6.6 * s, 12.5 * s, Math.sin(time * 3 + 1) * 2);
+    limb(Bo, ta[0], ta[1], ta[2], tb[0], tb[1], tb[2], 0.7 * s, 0.6 * s, col); limb(Bo, tb[0], tb[1], tb[2], tc[0], tc[1], tc[2], 0.6 * s, 0.45 * s, col);
+  }
+  var hx = sit ? 1.6 : 5.6, hd = T(hx * s, hy * s, 0); sphere(Bo, hd[0], hd[1], hd[2], 2.2 * s, 2 * s, 2.3 * s, a.a, col, 6, 4);
+  var e1 = T(hx * s - 0.2, (hy + 1.6) * s, 1.2 * s), e2 = T(hx * s - 0.2, (hy + 1.6) * s, -1.2 * s);
+  frus(Bo, e1[0], e1[2], a.a, 0, 0, e1[1], 1.6 * s, 1.4 * s, 0.2, 0.2, 0, 2 * s, col, 1, 0, col); frus(Bo, e2[0], e2[2], a.a, 0, 0, e2[1], 1.6 * s, 1.4 * s, 0.2, 0.2, 0, 2 * s, col, 1, 0, col);
+  var ey1 = T((hx + 2) * s, (hy + 0.4) * s, 0.8 * s), ey2 = T((hx + 2) * s, (hy + 0.4) * s, -0.8 * s);
+  box(Bo, ey1[0], ey1[1], ey1[2], 0.5, 0.6, 0.6, a.a, [0.75, 0.9, 0.25], 1, 2); box(Bo, ey2[0], ey2[1], ey2[2], 0.5, 0.6, 0.6, a.a, [0.75, 0.9, 0.25], 1, 2);
+}
+function addBird(a) {
+  var co = Math.cos(a.a), si = Math.sin(a.a), x = a.x, z = a.y, g = groundY(x, z) + (a.h || 0), col = C(a.col), fly = a.st !== 'ground';
+  function T(lx, ly, lz) { return [x + lx * co - lz * si, g + ly, z + lx * si + lz * co]; }
+  if (!fly) box(Bt, x, groundY(x, z) + 0.1, z, 6, 0.1, 4, a.a, [0, 0, 0], 0.3, 0);
+  var peck = !fly && Math.sin(a.ph * 0.7) > 0.6 ? -1.6 : 0;
+  var b = T(0, 2.8, 0); sphere(Bo, b[0], b[1], b[2], 2.9, 1.9, 1.8, a.a, col, 6, 3);
+  var nk = T(1.9, 3.8 + peck * 0.5, 0); sphere(Bo, nk[0], nk[1], nk[2], 1.1, 1.2, 1.1, a.a, [0.25, 0.42, 0.38], 4, 3);
+  var hd = T(2.8, 4.9 + peck, 0); sphere(Bo, hd[0], hd[1], hd[2], 1.2, 1.2, 1.1, a.a, col, 5, 3);
+  var bk = T(4, 4.7 + peck, 0); box(Bo, bk[0], bk[1], bk[2], 1.2, 0.5, 0.5, a.a, [0.85, 0.7, 0.4], 1, 0);
+  var tl = T(-3.2, 2.9, 0); box(Bo, tl[0], tl[1], tl[2], 2.2, 0.5, 1.8, a.a, Cm(col, 0.7), 1, 0);
+  if (fly) { var fl = Math.sin(time * 24 + a.ph) * 3.5; for (var sd = -1; sd <= 1; sd += 2) { var w0 = T(0.3, 3.3, sd * 1.4), w1 = T(-0.5, 3.3 + fl, sd * 7.5); limb(Bo, w0[0], w0[1], w0[2], w1[0], w1[1], w1[2], 1.4, 0.5, Cm(col, 0.85)); } }
+  else { var l1 = T(0.2, 1.2, 0.7), l2 = T(0.2, 1.2, -0.7); box(Bo, l1[0], g, l1[2], 0.4, 1.2, 0.4, 0, [0.8, 0.35, 0.3], 1, 0); box(Bo, l2[0], g, l2[2], 0.4, 1.2, 0.4, 0, [0.8, 0.35, 0.3], 1, 0); }
+}
+function addDuck(a) {
+  var co = Math.cos(a.a), si = Math.sin(a.a), x = a.x, z = a.y, g = 2.2 + Math.sin(a.ph) * 0.3;
+  function T(lx, ly, lz) { return [x + lx * co - lz * si, g + ly, z + lx * si + lz * co]; }
+  var bodyC = a.male ? C('#8d8a84') : C('#8a6a48'), headC = a.male ? C('#1f5a32') : C('#7a5a3a');
+  var b = T(0, 1.2, 0); sphere(Bo, b[0], b[1], b[2], 5, 2.6, 3.2, a.a, bodyC, 7, 3);
+  var tl = T(-4.6, 2.4, 0); box(Bo, tl[0], tl[1], tl[2], 2.6, 1.2, 2.2, a.a, Cm(bodyC, 0.6), 1, 0);
+  var nk = T(3.4, 3.6, 0); sphere(Bo, nk[0], nk[1], nk[2], 1.3, 1.8, 1.3, a.a, a.male ? C('#f0ece2') : bodyC, 4, 3);
+  var hd = T(3.9, 5.6, 0); sphere(Bo, hd[0], hd[1], hd[2], 1.9, 1.7, 1.6, a.a, headC, 6, 3);
+  var bk = T(5.9, 5.2, 0); box(Bo, bk[0], bk[1], bk[2], 2.2, 0.7, 1.3, a.a, [0.95, 0.75, 0.15], 1, 0);
+  glowFlat(Bg, x - co * 6, z - si * 6, 3.15, 9, [0.6, 0.65, 0.8], 0.12);
+}
+
 /* ---------- joueur ---------- */
 function nearestCar(r) {
   var b = null, bd = r;
@@ -755,7 +909,7 @@ function updateMission(dt) {
 /* ---------- jeu ---------- */
 function startGame() {
   Snd.init();
-  cars = []; peds = []; parts = []; floats = []; mission = null; banner = null; overlay = null;
+  cars = []; peds = []; animals = []; parts = []; floats = []; mission = null; banner = null; overlay = null;
   P.x = HOSPITAL.x; P.y = HOSPITAL.y + 40; P.a = -Math.PI / 2; P.hp = 100; P.money = 0; P.heat = 0; P.car = null; P.bust = 0; P.done = 0; P.vx = P.vy = 0;
   time = 0; hintT = 14;
   initPickups(); initPhones();
@@ -796,7 +950,7 @@ function updateGame(dt) {
   for (i = 0; i < cars.length; i++) for (var j = i + 1; j < cars.length; j++) {
     if (dist(cars[i].x, cars[i].y, P.x, P.y) < 1200) collideCars(cars[i], cars[j]);
   }
-  updatePeds(dt); resolvePeople(dt); updatePickups(dt); updateMission(dt); manageTraffic(dt);
+  updatePeds(dt); resolvePeople(dt); updateAnimals(dt); updatePickups(dt); updateMission(dt); manageTraffic(dt);
   // recherche : décroissance, arrestation
   var copNear = false, copClose = 0;
   cars.forEach(function (c) { if (c.role === 'cop' && !c.dead) { var d = dist(c.x, c.y, P.x, P.y); if (d < 480) copNear = true; if (d < 70) copClose++; } });
@@ -843,10 +997,10 @@ var FS = ['#ifdef GL_FRAGMENT_PRECISION_HIGH', 'precision highp float;', '#else'
 'float h(vec2 p){vec3 q=fract(vec3(p.xyx)*0.1031);q+=dot(q,q.yzx+33.33);return fract((q.x+q.y)*q.z);}',
 'float n2(vec2 p){vec2 i=floor(p);vec2 f=fract(p);f=f*f*(3.0-2.0*f);return mix(mix(h(i),h(i+vec2(1.0,0.0)),f.x),mix(h(i+vec2(0.0,1.0)),h(i+vec2(1.0,1.0)),f.x),f.y);}',
 'void main(){float k=vK;',
-' if(k>6.5){float sy=uRes.y-gl_FragCoord.y;float t=clamp((uHor-sy)/max(uHor,1.0),0.0,1.0);vec3 s=mix(uFog,uZen,pow(t,0.5));',
+' if(k>6.5&&k<7.5){float sy=uRes.y-gl_FragCoord.y;float t=clamp((uHor-sy)/max(uHor,1.0),0.0,1.0);vec3 s=mix(uFog,uZen,pow(t,0.5));',
 '  float st=step(0.9972,h(floor(gl_FragCoord.xy/3.0)))*t*t;s+=vec3(st*0.9);gl_FragColor=vec4(s,1.0);return;}',
 ' vec3 V=normalize(uEye-vP);float dist=length(uEye-vP);float f2=smoothstep(450.0,2300.0,dist);',
-' if(k>4.5){float g=1.0;if(k<5.5){float r=length(vN.xy);g=max(1.0-r,0.0);g*=g;}gl_FragColor=vec4(vC.rgb,vC.a*g*(1.0-f2));return;}',
+' if(k>4.5&&k<6.5){float g=1.0;if(k<5.5){float r=length(vN.xy);g=max(1.0-r,0.0);g*=g;}gl_FragColor=vec4(vC.rgb,vC.a*g*(1.0-f2));return;}',
 ' vec3 n=normalize(vN);vec3 SUN=normalize(vec3(-0.4,0.8,-0.32));float d=max(dot(n,SUN),0.0);',
 ' vec3 amb=mix(vec3(0.15,0.14,0.20),vec3(0.30,0.33,0.52),n.y*0.5+0.5);vec3 lc=amb+vec3(0.55,0.42,0.50)*d;',
 ' vec3 col=vC.rgb;vec3 res=col*lc;',
@@ -867,6 +1021,10 @@ var FS = ['#ifdef GL_FRAGMENT_PRECISION_HIGH', 'precision highp float;', '#else'
 ' else if(k>=3.5&&k<4.5){float nz=n2(vP.xz*0.07)*0.6+n2(vP.xz*0.55)*0.4;vec3 as=col*(0.75+0.5*nz);',
 '  float pud=smoothstep(0.50,0.68,n2(vP.xz*0.011+3.0));float fr=pow(1.0-max(V.y,0.0),2.5);vec3 rf=vec3(0.50,0.42,0.68)*(0.22+0.78*fr);',
 '  res=as*lc;res=mix(res,res*0.5+rf*0.55,pud*0.85);res+=rf*0.12*fr;}',
+' else if(k>7.5){vec2 q=vP.xz*0.09;float w1=n2(q+vec2(uTime*0.35,uTime*0.2));float w2=n2(q*2.3-vec2(uTime*0.25,-uTime*0.4));',
+'  vec3 nw=normalize(vec3((w1-0.5)*0.4,1.0,(w2-0.5)*0.4));float fr=pow(1.0-max(dot(nw,V),0.0),3.0);',
+'  res=mix(vec3(0.015,0.05,0.07),uFog*0.85+vec3(0.03,0.03,0.06),0.2+0.65*fr);vec3 R2=reflect(-V,nw);res+=pow(max(dot(R2,SUN),0.0),70.0)*0.4;',
+'  vec2 cell=floor(vP.xz/7.0);float rp=fract(h(cell)+uTime*1.1);float rr=length(fract(vP.xz/7.0)-0.5);res+=smoothstep(0.04,0.0,abs(rr-rp*0.45))*(1.0-rp)*0.25;n=nw;}',
 ' else{res=col*lc;if(n.y>0.5)res*=0.9+0.2*n2(vP.xz*0.2);}',
 ' if(uQ>0.5&&(k<1.5||k>2.5)){vec3 acc=vec3(0.0);',
 '  for(int i=0;i<8;i++){vec3 d=uL[i].xyz-vP;float dd=length(d);float a=max(1.0-dd/uL[i].w,0.0);a*=a;acc+=uLC[i]*a*(0.3+0.7*max(dot(n,d/max(dd,0.001)),0.0));}',
@@ -1015,13 +1173,20 @@ function buildStatic() {
       if (tileAt(tx, ty + 1) === G_ROAD) Q(S, x, 0, y + T, x + T, 0, y + T, x + T, 2, y + T, x, 2, y + T, 0, 0, 1, curbC, 1, 0);
       if (tileAt(tx - 1, ty) === G_ROAD) Q(S, x, 0, y, x, 0, y + T, x, 2, y + T, x, 2, y, -1, 0, 0, curbC, 1, 0);
       if (tileAt(tx + 1, ty) === G_ROAD) Q(S, x + T, 0, y, x + T, 0, y + T, x + T, 2, y + T, x + T, 2, y, 1, 0, 0, curbC, 1, 0);
-    } else if (t === G_GRASS || t === G_TREE) {
+    } else if (t === G_GRASS || t === G_TREE || t === G_WATER) {
       flat(S, x, y, x + T, y + T, 1, (d & 3) === 0 ? C('#2f5a30') : C('#2a5029'), 1, 0);
     } else if (t === G_LOT) {
       flat(S, x, y, x + T, y + T, 0.6, C('#3d4048'), 1, 4);
       flat(S, x + 1, y, x + 3, y + T, 0.9, C('#c9c9c2')); flat(S, x + T - 3, y, x + T - 1, y + T, 0.9, C('#c9c9c2'));
     }
   }
+  ponds.forEach(function (pd) {
+    var pr = mulberry(Math.floor(pd.x * 7 + pd.y));
+    cyl(S, pd.x, pd.y, 0.6, 2.4, pd.r + 4, C('#6f6b62'), 1, 0, 30); disc(S, pd.x, pd.y, 3.0, pd.r + 4, C('#7d786d'), 1, 0, 30);
+    disc(S, pd.x, pd.y, 3.05, pd.r, [0.25, 0.33, 0.42], 1, 8, 30);
+    for (var lp = 0; lp < 7; lp++) { var la = pr() * TAU, lr = pr() * (pd.r - 14) + 6; disc(S, pd.x + Math.cos(la) * lr, pd.y + Math.sin(la) * lr, 3.2, 3 + pr() * 3, C('#2f6a2c'), 1, 0, 8); if (pr() < 0.35) sphere(S, pd.x + Math.cos(la) * lr + 1, 3.9, pd.y + Math.sin(la) * lr, 1.2, 0.9, 1.2, 0, C('#e8a8c8'), 5, 3); }
+    for (var rd = 0; rd < 22; rd++) { var ra = pr() * TAU, rx = pd.x + Math.cos(ra) * (pd.r - 2), rz = pd.y + Math.sin(ra) * (pd.r - 2); for (var st = 0; st < 3; st++) box(S, rx + (pr() - 0.5) * 4, 3, rz + (pr() - 0.5) * 4, 0.7, 7 + pr() * 7, 0.7, 0, C('#4a6a2a'), 1, 0); }
+  });
   flat(S, HOSPITAL.x - 20, HOSPITAL.y - 60, HOSPITAL.x + 20, HOSPITAL.y + 60, 2.5, C('#c9243a')); flat(S, HOSPITAL.x - 60, HOSPITAL.y - 20, HOSPITAL.x + 60, HOSPITAL.y + 20, 2.5, C('#c9243a'));
   flat(S, HOSPITAL.x - 14, HOSPITAL.y - 54, HOSPITAL.x + 14, HOSPITAL.y + 54, 2.8, C('#e8e8e4')); flat(S, HOSPITAL.x - 54, HOSPITAL.y - 14, HOSPITAL.x + 54, HOSPITAL.y + 14, 2.8, C('#e8e8e4'));
   flat(S, GARAGE.x - 90, GARAGE.y - 90, GARAGE.x + 90, GARAGE.y + 90, 1.2, C('#1f6f58')); flat(S, GARAGE.x - 80, GARAGE.y - 80, GARAGE.x + 80, GARAGE.y + 80, 1.4, C('#3d4048'), 1, 4);
@@ -1344,6 +1509,7 @@ function buildDynamic() {
     cyl(Bt, t.x, t.y, 2, 170, t.r * pul, [1, 0.84, 0.04], 0.2, 2, 18); disc(Bt, t.x, t.y, 2.4, t.r * pul, [1, 0.84, 0.04], 0.3, 2, 18); glowFlat(Bg, t.x, t.y, 2.9, t.r * 1.8, [1, 0.8, 0.1], 0.35);
   });
   cyl(Bt, GARAGE.x, GARAGE.y, 2, 70, 80, [0.3, 0.9, 0.65], 0.10, 2, 18);
+  animals.forEach(function (a) { if (Math.abs(a.x - cam.x) + Math.abs(a.y - cam.y) > 750) return; if (a.kind === 'dog') addDog(a); else if (a.kind === 'cat') addCat(a); else if (a.kind === 'bird') addBird(a); else addDuck(a); });
   peds.forEach(function (p) { if (p.x < x0 || p.x > x1 || p.y < y0 || p.y > y1) return; var far = Math.abs(p.x - cam.x) + Math.abs(p.y - cam.y) > 800; if (far) addPersonLow(p.x, p.y, p.a, p.col, p.state === 'down'); else { if (p.sd === undefined) p.sd = Math.random(); addPerson(p.x, p.y, p.a, p.col, p.ph, p.state === 'down', false, p.sd, p.state === 'flee' ? 0.95 : 0.55); } });
   var RC = 1100;
   cars.forEach(function (c) { if (Math.abs(c.x - cam.x) > RC || Math.abs(c.y - cam.y) > RC) return; addCar(c); });
@@ -1525,7 +1691,7 @@ function drawMenu() {
   txt(state === 'menu' ? 'RUE NOIRE' : state === 'pause' ? 'PAUSE' : 'VOUS ÊTES LE ROI DE LA VILLE', cx, y, Math.min(64 * u, W / (state === 'win' ? 14 : 7)), '#ffd60a', 'center');
   ctx.shadowBlur = 0;
   if (state === 'menu') {
-    txt('Développé par Benoit Rousseaux', cx, y + 32 * u, 18 * u, '#ffffff', 'center');
+    txt('Développé par Benoit Rousseaux', cx, y + 32 * u, 18 * u, '#ffffff', 'center'); txt('Version 2', W - 16, H - 16, 14 * u * 0.9, '#ffd60a', 'right', false);
     var lines = ['Volez des voitures, acceptez des missions aux cabines jaunes,', 'échappez à la police et gagnez ' + money(GOAL) + '.'];
     lines.forEach(function (l, i) { txt(l, cx, y + 64 * u + i * 22 * u, 15 * u, '#cfd3da', 'center', false); });
     if (best > 0) txt('Record : ' + money(best), cx, y + 120 * u, 16 * u, '#9bffb0', 'center');
@@ -1579,7 +1745,7 @@ function step(dt) {
   else if (state === 'menu') { time += dt; drawMenu(); drawFX(dt); }
   else if (state === 'pause' || state === 'win') { drawMenu(); }
 }
-window.__rn = { update: function (d) { updateGame(d); }, P: P, cars: function () { return cars; }, peds: function () { return peds; }, step: step, start: startGame, setState: function (s) { state = s; }, get state() { return state; }, get mission() { return mission; }, keys: keys, act: function () { act = true; }, addHeat: addHeat, startMission: startMission, phones: function () { return phones; }, GARAGE: GARAGE, BANK: BANK, HOSPITAL: HOSPITAL, cam: cam, getTime: function () { return time; } };
+window.__rn = { ponds: function () { return ponds; }, animals: function () { return animals; }, update: function (d) { updateGame(d); }, P: P, cars: function () { return cars; }, peds: function () { return peds; }, step: step, start: startGame, setState: function (s) { state = s; }, get state() { return state; }, get mission() { return mission; }, keys: keys, act: function () { act = true; }, addHeat: addHeat, startMission: startMission, phones: function () { return phones; }, GARAGE: GARAGE, BANK: BANK, HOSPITAL: HOSPITAL, cam: cam, getTime: function () { return time; } };
 initGL();
 requestAnimationFrame(frame);
 })();

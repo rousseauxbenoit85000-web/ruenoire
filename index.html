@@ -272,9 +272,55 @@ var Snd = (function () {
     g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur); o.connect(g); g.connect(master); o.start(t); o.stop(t + dur + 0.05);
   }
   var BASS = [55, 0, 55, 82, 0, 73, 55, 0, 65, 0, 65, 98, 0, 87, 65, 0];
+  /* ---- autoradio : musique générée (métal / rap) ---- */
+  var radio = { style: null, on: true, next: 0, step: 0, bus: null, dist: null, nb: null, timer: null };
+  try { radio.on = localStorage.getItem('ruenoire-radio') !== '0'; } catch (e) {}
+  function rInit() {
+    if (radio.bus) return;
+    radio.bus = ac.createGain(); radio.bus.gain.value = 0.55; radio.bus.connect(master);
+    radio.dist = ac.createWaveShaper(); var cv2 = new Float32Array(1024); for (var i = 0; i < 1024; i++) { var x = i / 512 - 1; cv2[i] = Math.tanh(x * 9) * 0.8; } radio.dist.curve = cv2;
+    radio.gtone = ac.createBiquadFilter(); radio.gtone.type = 'lowpass'; radio.gtone.frequency.value = 3200; radio.dist.connect(radio.gtone); var gg = ac.createGain(); gg.gain.value = 0.22; radio.gtone.connect(gg); gg.connect(radio.bus);
+    radio.nb = ac.createBuffer(1, ac.sampleRate, ac.sampleRate); var d = radio.nb.getChannelData(0); for (var j = 0; j < d.length; j++) d[j] = Math.random() * 2 - 1;
+    radio.timer = setInterval(rTick, 25);
+  }
+  function env(g, t, a, peak, dec) { g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(peak, t + a); g.gain.exponentialRampToValueAtTime(0.0001, t + a + dec); }
+  function osc(type, f, t, dur, peak, dest, f2) { var o = ac.createOscillator(), g = ac.createGain(); o.type = type; o.frequency.setValueAtTime(f, t); if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + dur * 0.6); env(g, t, 0.004, peak, dur); o.connect(g); g.connect(dest || radio.bus); o.start(t); o.stop(t + dur + 0.05); }
+  function noiseHit(t, dur, peak, type, f) { var src = ac.createBufferSource(), bf = ac.createBiquadFilter(), g = ac.createGain(); src.buffer = radio.nb; bf.type = type; bf.frequency.value = f; env(g, t, 0.002, peak, dur); src.connect(bf); bf.connect(g); g.connect(radio.bus); src.start(t, Math.random() * 0.5); src.stop(t + dur + 0.05); }
+  function kick(t, v) { osc('sine', 160, t, 0.22, v, null, 42); }
+  function snare(t, v) { noiseHit(t, 0.16, v, 'highpass', 1400); osc('triangle', 210, t, 0.09, v * 0.6); }
+  function hat(t, v, open) { noiseHit(t, open ? 0.18 : 0.035, v, 'highpass', 7500); }
+  function guitar(t, f, dur, v) { [1, 1.5, 2].forEach(function (m, i) { var o = ac.createOscillator(), g = ac.createGain(); o.type = 'sawtooth'; o.frequency.value = f * m; o.detune.value = i * 6 - 6; env(g, t, 0.003, v, dur); o.connect(g); g.connect(radio.dist); o.start(t); o.stop(t + dur + 0.05); }); }
+  var NOTE = { E: 82.41, F: 87.31, G: 98.0, A: 110.0, Bb: 116.54, B: 123.47, D: 146.83, C: 130.81 };
+  var RIFF = ['E', 'E', 'E', '-', 'E', 'E', 'G', '-', 'E', 'E', 'Bb', '-', 'A', '-', 'G', 'F', 'E', 'E', 'E', '-', 'E', 'E', 'G', '-', 'E', 'E', 'B', '-', 'D', '-', 'B', 'A'];
+  var RIFF2 = ['E', '-', 'E', 'E', 'G', '-', 'E', 'E', 'A', '-', 'E', 'E', 'Bb', 'A', 'G', 'E', 'E', '-', 'E', 'E', 'G', '-', 'E', 'E', 'C', '-', 'B', '-', 'A', 'G', 'F', 'E'];
+  var CH = [[220, 261.6, 329.6], [174.6, 220, 261.6], [196, 261.6, 329.6], [196, 246.9, 293.7]], BAS = [55, 43.65, 65.41, 49], PENTA = [440, 523.3, 587.3, 659.3, 784];
+  function rStep(st, t, sd) {
+    if (radio.style === 'metal') {
+      var bar = Math.floor(st / 16), part = Math.floor(st / 64) % 2, i = st % 32, r = (part ? RIFF2 : RIFF)[i], n = NOTE[r];
+      if (n) { var acc = r !== 'E'; guitar(t, n, acc ? sd * 1.8 : sd * 0.55, acc ? 0.5 : 0.35); osc('sawtooth', n / 2, t, acc ? sd * 1.6 : sd * 0.6, 0.12); }
+      if (part ? true : st % 2 === 0) kick(t, 0.55);
+      if (st % 16 === 4 || st % 16 === 12) snare(t, 0.45);
+      if (st % 2 === 0) hat(t, 0.12, false);
+      if (st % 64 === 0) noiseHit(t, 1.4, 0.25, 'highpass', 4000);
+    } else if (radio.style === 'rap') {
+      var b = Math.floor(st / 16) % 4, k = st % 16, sw = (k % 2) ? sd * 0.18 : 0;
+      if (k === 0 || k === 7 || k === 10) { kick(t, 0.7); osc('sine', BAS[b], t, sd * 3.2, 0.5, null, BAS[b] * 0.94); }
+      if (k === 4 || k === 12) snare(t, 0.5);
+      if (k % 2 === 0) hat(t + sw, k === 14 ? 0.1 : 0.07, k === 14); else if (Math.random() < 0.3) hat(t + sw, 0.04, false);
+      if (k === 0 || k === 8) CH[b].forEach(function (f) { osc('triangle', f, t, sd * 6, 0.05); });
+      if ((k === 2 || k === 6 || k === 11 || k === 14) && Math.random() < 0.35) osc('sine', pick(PENTA), t, sd * 2, 0.04);
+      if (Math.random() < 0.2) noiseHit(t + Math.random() * sd, 0.01, 0.015, 'bandpass', 3000);
+    }
+  }
+  function rTick() {
+    if (!ac || !radio.style || !radio.on || !on || state !== 'play') return;
+    var bpm = radio.style === 'metal' ? 168 : 88, sd = 60 / bpm / 4;
+    if (radio.next < ac.currentTime) radio.next = ac.currentTime + 0.05;
+    while (radio.next < ac.currentTime + 0.12) { rStep(radio.step, radio.next, sd); radio.step++; radio.next += sd; }
+  }
   function startMusic() {
     mt = setInterval(function () {
-      if (!ac || !on || state !== 'play') return;
+      if (!ac || !on || state !== 'play' || (radio.style && radio.on)) return;
       var f = BASS[step % 16]; step++;
       if (f) { var o = ac.createOscillator(), g = ac.createGain(), t = ac.currentTime; o.type = 'square'; o.frequency.value = f; g.gain.setValueAtTime(0.05, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.2); o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.22); }
       if (step % 2 === 0) noise(0.04, 0.025, 6000);
@@ -292,6 +338,9 @@ var Snd = (function () {
       var sv = on && state === 'play' ? sirenVol * 0.05 : 0; sir.g.gain.setTargetAtTime(sv, t, 0.1);
       if (sv > 0.001) { sirT += 1; sir.o.frequency.setTargetAtTime((Math.floor(time * 2.2) & 1) ? 920 : 690, t, 0.02); }
     },
+    radio: function (st) { if (!ac) return; rInit(); if (st !== radio.style) { radio.style = st; radio.step = 0; radio.next = ac.currentTime + 0.1; } },
+    radioToggle: function () { radio.on = !radio.on; try { localStorage.setItem('ruenoire-radio', radio.on ? '1' : '0'); } catch (e) {} },
+    radioInfo: function () { return radio; },
     stop: function () { if (!ac) return; var t = ac.currentTime; eng.g.gain.setTargetAtTime(0, t, 0.05); sir.g.gain.setTargetAtTime(0, t, 0.05); }
   };
 })();
@@ -316,6 +365,7 @@ function pdown(e) {
   if (state === 'menu' || state === 'win' || state === 'pause') { menuClick(x, y); return; }
   if (inCircle(UI.pause, x, y)) { state = 'pause'; Snd.stop(); return; }
   if (inCircle(UI.sound, x, y)) { Snd.toggle(); return; }
+  if (UI.radio && x >= UI.radio.x && x <= UI.radio.x + UI.radio.w && y >= UI.radio.y && y <= UI.radio.y + UI.radio.h) { Snd.radioToggle(); return; }
   if (inCircle(UI.act, x, y)) { btns[e.pointerId] = 'act'; act = true; return; }
   if (P.car && P.car.air && inCircle(UI.down, x, y)) { btns[e.pointerId] = 'down'; return; }
   if (!P.car && inCircle(UI.down, x, y)) { jumpReq = true; btns[e.pointerId] = 'jump'; return; }
@@ -331,6 +381,7 @@ window.addEventListener('keydown', function (e) {
   if (e.code === 'KeyE' || e.code === 'Enter') { if (state === 'menu') startGame(); else act = true; }
   if (e.code === 'KeyP' || e.code === 'Escape') { if (state === 'play') { state = 'pause'; Snd.stop(); } else if (state === 'pause') state = 'play'; }
   if (e.code === 'KeyM') Snd.toggle();
+  if (e.code === 'KeyR') Snd.radioToggle();
   if (e.code === 'KeyF') keys.Fire = true;
   if (e.code === 'Space' && !e.repeat && !P.car) jumpReq = true;
   if (e.code.indexOf('Arrow') === 0 || e.code === 'Space') e.preventDefault();
@@ -1320,6 +1371,7 @@ function updateGame(dt) {
   // sons
   var sv = 0; cars.forEach(function (c) { if (c.role === 'cop' && c.ai.mode === 'chase' && !c.dead) { var d = dist(c.x, c.y, P.x, P.y); sv = Math.max(sv, clamp(1 - d / 800, 0, 1)); } });
   Snd.update(spd, !!P.car, sv, P.car ? P.car.slip : 0);
+  Snd.radio(P.car && !P.car.air && P.car.t !== 'boat' && !P.car.dead ? ((P.car.t === 'sport' || P.car.t === 'super') ? 'metal' : 'rap') : null);
   checkWin();
 }
 
@@ -2419,6 +2471,8 @@ function drawHUD() {
     ctx.font = 'bold 11px Roboto, Arial, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = q[2]; ctx.fillText(q[0], px, py + 0.5); ctx.textBaseline = 'alphabetic';
   });
   txt((ENV.night > 0.5 ? '\u263E ' : '\u2600 ') + clockStr() + '  ' + WXL[WX.name], mx + ms, my + ms + 18, 13, ENV.night > 0.5 ? '#c8d0ff' : '#ffe08a', 'right');
+  var ri = Snd.radioInfo ? Snd.radioInfo() : null; UI.radio = null;
+  if (ri && ri.style && P.car) { var rl = '\u266B ' + (ri.style === 'metal' ? 'Radio M\u00e9tal' : 'Radio Rap') + (ri.on ? '' : ' (coup\u00e9e)'), rw = 150; UI.radio = { x: mx + ms - rw, y: my + ms + 26, w: rw, h: 24 }; ctx.fillStyle = 'rgba(0,0,0,.5)'; rr(ctx, UI.radio.x, UI.radio.y, rw, 24, 12); ctx.fill(); txt(rl, mx + ms - rw / 2, my + ms + 43, 13, ri.style === 'metal' ? '#ff6b6b' : '#ffd60a', 'center', false); }
   // boutons haut
   UI.pause.x = mx - 30; UI.pause.y = my + 26; UI.sound.x = mx - 30; UI.sound.y = my + 80;
   circBtn(UI.pause, 'Ⅱ', false); circBtn(UI.sound, Snd.isOn() ? '♪' : '✕', false);
@@ -2489,7 +2543,7 @@ function drawMenu() {
   txt(state === 'menu' ? 'RUE NOIRE' : state === 'pause' ? 'PAUSE' : 'VOUS ÊTES LE ROI DE LA VILLE', cx, y, Math.min(64 * u, W / (state === 'win' ? 14 : 7)), '#ffd60a', 'center');
   ctx.shadowBlur = 0;
   if (state === 'menu') {
-    txt('Développé par Benoit Rousseaux', cx, y + 32 * u, 18 * u, '#ffffff', 'center'); txt('Version 7.1', W - 16, H - 16, 14 * u * 0.9, '#ffd60a', 'right', false);
+    txt('Développé par Benoit Rousseaux', cx, y + 32 * u, 18 * u, '#ffffff', 'center'); txt('Version 7.2', W - 16, H - 16, 14 * u * 0.9, '#ffd60a', 'right', false);
     var lines = ['Volez des voitures, acceptez des missions aux cabines jaunes,', 'échappez à la police et gagnez ' + money(GOAL) + '.'];
     lines.forEach(function (l, i) { txt(l, cx, y + 64 * u + i * 22 * u, 15 * u, '#cfd3da', 'center', false); });
     if (best > 0) txt('Record : ' + money(best), cx, y + 120 * u, 16 * u, '#9bffb0', 'center');
@@ -2518,7 +2572,7 @@ function drawMenu() {
   }
   if (state === 'menu') {
     button('JOUER', by, startGame);
-    if (!touchMode) txt('Clavier : flèches ou ZQSD · E : entrer/sortir · F : tirer · Maj : courir · Espace : sauter/frein · P : pause', cx, by + 90 * u, 14 * u * 0.9, '#bfc4cc', 'center', false);
+    if (!touchMode) txt('Clavier : flèches ou ZQSD · E : entrer/sortir · F : tirer · R : radio · Maj : courir · Espace : sauter/frein · P : pause', cx, by + 90 * u, 14 * u * 0.9, '#bfc4cc', 'center', false);
     txt('Jeu original, inspiré des classiques d\'arcade vus de dessus.', cx, H - 22, 12 * u * 0.9, '#8a909a', 'center', false);
   } else if (state === 'pause') {
     button('REPRENDRE', by, function () { state = 'play'; });

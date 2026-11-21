@@ -104,6 +104,13 @@ function genMap() {
   // route vers le port (dans l'axe du centre-ville)
   var my = CC * 8, cEnd = coastX(my) - 3;
   for (tx = RING1 * 8 + 2; tx < cEnd; tx++) { map[my * N + tx] = G_ROAD; map[(my + 1) * N + tx] = G_ROAD; }
+  // route de la côte (corniche) à l'est et au sud + liaisons avec le périphérique
+  var CR = 20 * 8;
+  function rd(x0, y0, x1, y1) { for (var yy = y0; yy <= y1; yy++) for (var xx = x0; xx <= x1; xx++) if (xx >= 0 && yy >= 0 && xx < N && yy < N && map[yy * N + xx] !== G_SEA) map[yy * N + xx] = G_ROAD; }
+  rd(CR, RING0 * 8, CR + 1, CR + 1); rd(RING0 * 8, CR, CR + 1, CR + 1);
+  rd(RING1 * 8 + 2, RING0 * 8, CR - 1, RING0 * 8 + 1); rd(RING0 * 8, RING1 * 8 + 2, RING0 * 8 + 1, CR - 1);
+  [CB0, CB1 + 1].forEach(function (k) { rd(RING1 * 8 + 2, k * 8, CR - 1, k * 8 + 1); rd(k * 8, RING1 * 8 + 2, k * 8 + 1, CR - 1); });
+  rd(CC * 8, RING1 * 8 + 2, CC * 8 + 1, CR - 1);
   var pierY = my + 4, pierX0 = coastX(pierY) - 2;
   for (tx = pierX0; tx < pierX0 + 9; tx++) map[pierY * N + tx] = G_DOCK;
   for (ty = my + 2; ty < pierY; ty++) for (tx = cEnd - 2; tx < pierX0 + 1; tx++) if (map[ty * N + tx] !== G_SEA) map[ty * N + tx] = G_SAND;
@@ -2175,6 +2182,7 @@ function drawHUD() {
   ctx.drawImage(mini, pxm - hs / 2, pym - hs / 2, hs, hs, -hs * k / 2, -hs * k / 2, hs * k, hs * k);
   function dot(wx, wy, col, r) { var px = ((wx / T * 4) - pxm) * k, py = ((wy / T * 4) - pym) * k; if (Math.abs(px) > ms * 0.75 || Math.abs(py) > ms * 0.75) return; ctx.fillStyle = col; ctx.beginPath(); ctx.arc(px, py, r, 0, TAU); ctx.fill(); }
   phones.forEach(function (p) { if (p.cd <= 0) dot(p.x, p.y, '#ffd400', 3); });
+  (function () { var px = ((MARINA.x / T * 4) - pxm) * k, py = ((MARINA.y / T * 4) - pym) * k; if (Math.abs(px) > ms * 0.75 || Math.abs(py) > ms * 0.75) return; ctx.save(); ctx.translate(px, py); ctx.rotate(cam.yaw + Math.PI / 2); ctx.fillStyle = '#4cc9f0'; ctx.beginPath(); ctx.arc(0, 0, 6, 0, TAU); ctx.fill(); ctx.fillStyle = '#04253a'; ctx.font = 'bold 9px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('\u2693', 0, 0.5); ctx.textBaseline = 'alphabetic'; ctx.restore(); })();
   cars.forEach(function (c) { if (c.role === 'cop' && !c.dead && c.ai.mode === 'chase') dot(c.x, c.y, Math.floor(time * 4) % 2 ? '#ff2b2b' : '#2b6bff', 3); });
   if (mission) mission.targets.forEach(function (t) { dot(t.x, t.y, '#ffffff', 4); });
   ctx.restore();
@@ -2258,7 +2266,7 @@ function drawMenu() {
   txt(state === 'menu' ? 'RUE NOIRE' : state === 'pause' ? 'PAUSE' : 'VOUS ÊTES LE ROI DE LA VILLE', cx, y, Math.min(64 * u, W / (state === 'win' ? 14 : 7)), '#ffd60a', 'center');
   ctx.shadowBlur = 0;
   if (state === 'menu') {
-    txt('Développé par Benoit Rousseaux', cx, y + 32 * u, 18 * u, '#ffffff', 'center'); txt('Version 5.5', W - 16, H - 16, 14 * u * 0.9, '#ffd60a', 'right', false);
+    txt('Développé par Benoit Rousseaux', cx, y + 32 * u, 18 * u, '#ffffff', 'center'); txt('Version 5.6', W - 16, H - 16, 14 * u * 0.9, '#ffd60a', 'right', false);
     var lines = ['Volez des voitures, acceptez des missions aux cabines jaunes,', 'échappez à la police et gagnez ' + money(GOAL) + '.'];
     lines.forEach(function (l, i) { txt(l, cx, y + 64 * u + i * 22 * u, 15 * u, '#cfd3da', 'center', false); });
     if (best > 0) txt('Record : ' + money(best), cx, y + 120 * u, 16 * u, '#9bffb0', 'center');

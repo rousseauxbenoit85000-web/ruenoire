@@ -352,7 +352,7 @@ function layoutUI() {
   var m = Math.min(W, H);
   UI.act = { x: W - m * 0.2 - 10, y: H - m * 0.24, r: m * 0.11 };
   UI.brake = { x: W - m * 0.43, y: H - m * 0.14, r: m * 0.085 };
-  UI.down = { x: W - m * 0.43 - m * 0.2, y: H - m * 0.1, r: m * 0.075 };
+  UI.down = { x: W - m * 0.43 - m * 0.24, y: H - m * 0.1, r: m * 0.075 };
   UI.pause = { x: W - 24 - 112 - 36, y: 40, r: 22 };
   UI.sound = { x: W - 24 - 112 - 36, y: 92, r: 22 };
 }
@@ -2514,7 +2514,7 @@ function drawHUD() {
     if (P.car && P.car.air) { circBtn(UI.brake, 'MONTER', airUp(), '#4cc9f0'); circBtn(UI.down, 'DESCENDRE', airDown(), '#ffd60a'); }
     else if (P.car) circBtn(UI.brake, 'FREIN', getBrake(), '#ff6b6b');
     if (!P.car) circBtn(UI.down, 'SAUT', P.jh > 0, '#9bffb0');
-    else circBtn(UI.brake, 'TIR', Object.keys(btns).some(function (k) { return btns[k] === 'fire'; }) || !!keys.Fire, P.ammo > 0 ? '#ff3b3b' : 'rgba(255,255,255,.35)');
+    if (!P.car) circBtn(UI.brake, 'TIR', Object.keys(btns).some(function (k) { return btns[k] === 'fire'; }) || !!keys.Fire, P.ammo > 0 ? '#ff3b3b' : 'rgba(255,255,255,.35)');
   }
   if (overlay) {
     ctx.globalAlpha = clamp(overlay.t * 2, 0, 1); ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(0, 0, W, H);
@@ -2543,7 +2543,7 @@ function drawMenu() {
   txt(state === 'menu' ? 'RUE NOIRE' : state === 'pause' ? 'PAUSE' : 'VOUS ÊTES LE ROI DE LA VILLE', cx, y, Math.min(64 * u, W / (state === 'win' ? 14 : 7)), '#ffd60a', 'center');
   ctx.shadowBlur = 0;
   if (state === 'menu') {
-    txt('Développé par Benoit Rousseaux', cx, y + 32 * u, 18 * u, '#ffffff', 'center'); txt('Version 7.2', W - 16, H - 16, 14 * u * 0.9, '#ffd60a', 'right', false);
+    txt('Développé par Benoit Rousseaux', cx, y + 32 * u, 18 * u, '#ffffff', 'center'); txt('Version 7.3', W - 16, H - 16, 14 * u * 0.9, '#ffd60a', 'right', false);
     var lines = ['Volez des voitures, acceptez des missions aux cabines jaunes,', 'échappez à la police et gagnez ' + money(GOAL) + '.'];
     lines.forEach(function (l, i) { txt(l, cx, y + 64 * u + i * 22 * u, 15 * u, '#cfd3da', 'center', false); });
     if (best > 0) txt('Record : ' + money(best), cx, y + 120 * u, 16 * u, '#9bffb0', 'center');

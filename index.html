@@ -63,6 +63,7 @@ function cityTile(tx, ty) { return tx >= CB0 * 8 && tx < (CB1 + 1) * 8 + 2 && ty
 function cityNode(ix, iy) { return ix >= CB0 && ix <= CB1 + 1 && iy >= CB0 && iy <= CB1 + 1; }
 var G_ROAD = 0, G_WALK = 1, G_BLD = 2, G_GRASS = 3, G_TREE = 4, G_LOT = 5, G_WATER = 6, G_FIELD = 7, G_SEA = 8, G_SAND = 9, G_DOCK = 10;
 var DSN = { x: 0, y: 0 }, signQ = [];
+var sandSpots = [], shoreSpots = [];
 var boatSpots = [], lighthouses = [], MARINA = { x: 0, y: 0 };
 function coastX(ty) { return 176 + Math.round(Math.sin(ty * 0.045) * 9 + Math.sin(ty * 0.13 + 1) * 3); }
 function coastY(tx) { return 176 + Math.round(Math.sin(tx * 0.05 + 2) * 8 + Math.sin(tx * 0.11) * 3); }
@@ -185,6 +186,11 @@ function genMap() {
     if (tileAt(bx * 8, by * 8) !== G_ROAD) continue;
     var nd = 0; for (var dd = 0; dd < 4; dd++) if (roadDir(bx, by, dd)) nd++;
     if (nd >= 3) nodes.push({ ix: bx, iy: by });
+  }
+  for (ty = 1; ty < N - 1; ty++) for (tx = 1; tx < N - 1; tx++) {
+    var tq = map[ty * N + tx];
+    if (tq === G_SAND) sandSpots.push({ x: (tx + 0.5) * T, y: (ty + 0.5) * T });
+    if (tq === G_SEA && (map[ty * N + tx - 1] === G_SAND || map[ty * N + tx + 1] === G_SAND || map[(ty - 1) * N + tx] === G_SAND || map[(ty + 1) * N + tx] === G_SAND)) shoreSpots.push({ x: (tx + 0.5) * T, y: (ty + 0.5) * T });
   }
   for (ty = 0; ty < N; ty++) for (tx = 0; tx < N; tx++) { if (map[ty * N + tx] === G_SAND && (tx * 7 + ty * 13) % 11 === 0) grassSpots.push({ x: (tx + 0.5) * T, y: (ty + 0.5) * T }); if (map[ty * N + tx] === G_WALK) walkSpots.push({ x: (tx + 0.5) * T, y: (ty + 0.5) * T }); if (map[ty * N + tx] === G_GRASS) grassSpots.push({ x: (tx + 0.5) * T, y: (ty + 0.5) * T }); }
 }
@@ -587,11 +593,12 @@ function updatePeds(dt) {
     var scare = null;
     for (var j = 0; j < cars.length; j++) { var c = cars[j]; if (c.speed > 70 && Math.abs(c.x - p.x) < 130 && Math.abs(c.y - p.y) < 130 && dist(c.x, c.y, p.x, p.y) < 130) { scare = c; break; } }
     var sp = p.sp;
-    if (scare) { p.state = 'flee'; p.t = 3; p.a = Math.atan2(p.y - scare.y, p.x - scare.x); }
+    if (scare) { p.lie = false; p.state = 'flee'; p.t = 3; p.a = Math.atan2(p.y - scare.y, p.x - scare.x); }
+    if (p.lie) { if (dist(p.x, p.y, P.x, P.y) < 16 && !P.car) { p.lie = false; p.state = 'flee'; p.t = 2; p.a = Math.atan2(p.y - P.y, p.x - P.x); } else continue; }
     if (p.state === 'flee') { sp = 105; p.t -= dt; if (p.t <= 0) p.state = 'walk'; }
     else { p.t -= dt; if (p.t <= 0) { p.a += rnd(-1.2, 1.2); p.t = rnd(1.5, 4); } }
     var nx = p.x + Math.cos(p.a) * sp * dt, ny = p.y + Math.sin(p.a) * sp * dt;
-    if (pedOk(nx, ny)) { p.x = nx; p.y = ny; } else { p.a += rnd(1.5, 3); if (p.state === 'flee') p.state = 'walk'; }
+    if (p.beach ? (tileAt(Math.floor(nx / T), Math.floor(ny / T)) === G_SAND) : pedOk(nx, ny)) { p.x = nx; p.y = ny; } else { p.a += rnd(1.5, 3); if (p.state === 'flee') p.state = 'walk'; }
     p.ph += dt * sp * 0.15;
     // renversé par une voiture
     for (var k = 0; k < cars.length; k++) {
@@ -608,6 +615,15 @@ function updatePeds(dt) {
     }
   }
   if (peds.length < 46 && Math.random() < dt * 6) spawnPed();
+  var nb = 0; peds.forEach(function (q) { if (q.beach) nb++; });
+  if (nb < 14 && sandSpots.length && Math.random() < dt * 3) {
+    for (var kk = 0; kk < 8; kk++) {
+      var ss = pick(sandSpots), dss = dist(ss.x, ss.y, P.x, P.y); if (dss < 250 || dss > 1000) continue;
+      var lie = Math.random() < 0.45, swc = pick(['#e63946', '#1d3557', '#f4a261', '#2a9d8f', '#ffbe0b', '#8338ec', '#ff006e', '#0077b6']);
+      peds.push({ x: ss.x + rnd(-20, 20), y: ss.y + rnd(-20, 20), a: rnd(0, TAU), sp: rnd(22, 34), col: swc, sw: C(swc), beach: true, lie: lie, towel: pick(['#ff006e', '#3a86ff', '#ffbe0b', '#06d6a0', '#ef476f']), state: 'walk', t: rnd(1, 4), ph: rnd(0, 6) });
+      break;
+    }
+  }
 }
 
 /* ---------- collisions entre personnages ---------- */
@@ -711,6 +727,9 @@ function manageAnimals(dt) {
     if (countA('fish') < 4) { var fp = seaPoint(P.x, P.y, 150, 900); if (fp && deepSea(fp[0], fp[1], 70)) { var fo = []; for (var f2 = 0; f2 < 9; f2++) fo.push([rnd(-30, 30), rnd(-22, 22), rnd(0, 6)]); animals.push({ kind: 'fish', x: fp[0], y: fp[1], a: rnd(0, TAU), t: rnd(2, 5), ph: 0, off: fo, jump: -1, jt: rnd(1, 5) }); } }
     if (countA('dolphin') < 4) { var dpp = seaPoint(P.x, P.y, 300, 1000); if (dpp && deepSea(dpp[0], dpp[1], 110)) { var hd = rnd(0, TAU); for (var dn = 0; dn < 4; dn++) animals.push({ kind: 'dolphin', x: dpp[0] + rnd(-40, 40), y: dpp[1] + rnd(-40, 40), a: hd, t: rnd(3, 6), ph: rnd(0, TAU), sp: rnd(80, 100), lead: dn === 0 }); } }
   }
+  if (countA('swim') < 7 && shoreSpots.length && Math.random() < dt * 2) {
+    for (var ks = 0; ks < 8; ks++) { var sp5 = pick(shoreSpots), d5 = dist(sp5.x, sp5.y, P.x, P.y); if (d5 < 200 || d5 > 1000) continue; animals.push({ kind: 'swim', x: sp5.x + rnd(-20, 20), y: sp5.y + rnd(-20, 20), a: rnd(0, TAU), t: rnd(2, 5), ph: rnd(0, 6), sd: Math.random(), cap: pick(['#ff006e', '#ffbe0b', '#3a86ff', '#f2f2f2', '#06d6a0']) }); break; }
+  }
   ponds.forEach(function (pd) {
     if (dist(pd.x, pd.y, P.x, P.y) > 950) return;
     var n2c = 0; animals.forEach(function (a) { if (a.pond === pd) n2c++; });
@@ -773,6 +792,13 @@ function updateAnimals(dt) {
         var v = Math.min(110, dl * 1.5 + 20); a.x += Math.cos(a.a) * v * dt; a.y += Math.sin(a.a) * v * dt; a.h = Math.max(0, Math.min(a.h, dl * 0.35));
         if (dl < 4 || a.h <= 0.1) { a.st = 'ground'; a.h = 0; a.t = rnd(0.5, 2); if (!animalOk(a.x, a.y)) { a.x = a.tx; a.y = a.ty; } }
       }
+    } else if (a.kind === 'swim') {
+      a.t -= dt; if (a.t <= 0) { a.a += rnd(-1.6, 1.6); a.t = rnd(3, 7); }
+      var boatN = P.car && P.car.t === 'boat' && dist(P.car.x, P.car.y, a.x, a.y) < 140; if (boatN) a.a = Math.atan2(a.y - P.car.y, a.x - P.car.x);
+      var nxs = a.x + Math.cos(a.a) * 16 * dt, nys = a.y + Math.sin(a.a) * 16 * dt, ts = tileAt(Math.floor(nxs / T), Math.floor(nys / T));
+      var nearSand = false; for (var oy = -2; oy <= 2 && !nearSand; oy++) for (var ox = -2; ox <= 2; ox++) if (tileAt(Math.floor(nxs / T) + ox, Math.floor(nys / T) + oy) === G_SAND) { nearSand = true; break; }
+      if (ts === G_SEA && nearSand) { a.x = nxs; a.y = nys; } else a.a += 2 + rnd(0, 1);
+      a.ph += dt * 4;
     } else if (a.kind === 'fish' || a.kind === 'dolphin') {
       var fast = a.kind === 'dolphin', boat = P.car && P.car.t === 'boat' ? P.car : null;
       a.t -= dt; if (a.t <= 0) { a.a += rnd(-0.9, 0.9); a.t = rnd(2, 5); }
@@ -796,7 +822,7 @@ function updateAnimals(dt) {
       if (dist(a.x, a.y, P.x, P.y) < 90 && !P.car) a.a = Math.atan2(a.y - P.y, a.x - P.x);
       a.x += Math.cos(a.a) * 13 * dt; a.y += Math.sin(a.a) * 13 * dt;
     }
-    if (a.kind !== 'duck' && a.kind !== 'bird' && a.kind !== 'fish' && a.kind !== 'dolphin' && !P.car) { var dp = dist(a.x, a.y, P.x, P.y); if (dp < 15 && dp > 0.01) { var nx = a.x + (a.x - P.x) / dp * (15 - dp), ny = a.y + (a.y - P.y) / dp * (15 - dp); if (animalOk(nx, ny)) { a.x = nx; a.y = ny; } } }
+    if (a.kind !== 'duck' && a.kind !== 'bird' && a.kind !== 'swim' && a.kind !== 'fish' && a.kind !== 'dolphin' && !P.car) { var dp = dist(a.x, a.y, P.x, P.y); if (dp < 15 && dp > 0.01) { var nx = a.x + (a.x - P.x) / dp * (15 - dp), ny = a.y + (a.y - P.y) / dp * (15 - dp); if (animalOk(nx, ny)) { a.x = nx; a.y = ny; } } }
   }
 }
 /* rendu des animaux */
@@ -854,6 +880,16 @@ function addBird(a) {
   var tl = T(-3.2, 2.9, 0); box(Bo, tl[0], tl[1], tl[2], 2.2, 0.5, 1.8, a.a, Cm(col, 0.7), 1, 0);
   if (fly) { var fl = Math.sin(time * 24 + a.ph) * 3.5; for (var sd = -1; sd <= 1; sd += 2) { var w0 = T(0.3, 3.3, sd * 1.4), w1 = T(-0.5, 3.3 + fl, sd * 7.5); limb(Bo, w0[0], w0[1], w0[2], w1[0], w1[1], w1[2], 1.4, 0.5, Cm(col, 0.85)); } }
   else { var l1 = T(0.2, 1.2, 0.7), l2 = T(0.2, 1.2, -0.7); box(Bo, l1[0], g, l1[2], 0.4, 1.2, 0.4, 0, [0.8, 0.35, 0.3], 1, 0); box(Bo, l2[0], g, l2[2], 0.4, 1.2, 0.4, 0, [0.8, 0.35, 0.3], 1, 0); }
+}
+function addSwimmer(a) {
+  var co = Math.cos(a.a), si = Math.sin(a.a), x = a.x, z = a.y, y = 0.2 + Math.sin(a.ph * 0.7) * 0.4, skin = SKINS[Math.floor(a.sd * 97) % 5];
+  sphere(Bo, x, y, z, 6, 2.2, 4, a.a, skin, 6, 3);
+  var hd = [x + co * 7, y + 2.2, z + si * 7]; sphere(Bo, hd[0], hd[1], hd[2], 2.6, 2.6, 2.5, a.a, skin, 6, 4); sphere(Bo, hd[0] - co * 0.4, hd[1] + 0.9, hd[2] - si * 0.4, 2.75, 1.9, 2.65, a.a, C(a.cap), 6, 3);
+  for (var s = -1; s <= 1; s += 2) {
+    var ph = a.ph + (s > 0 ? 0 : Math.PI), sx = x + co * 3 - si * s * 4, sz = z + si * 3 + co * s * 4, hx = sx + co * Math.cos(ph) * 9 - si * s * 2, hz = sz + si * Math.cos(ph) * 9 + co * s * 2, hy = y + Math.sin(ph) * 6;
+    limb(Bo, sx, y + 1, sz, hx, hy, hz, 1.3, 1, skin);
+  }
+  box(Bt, x - co * 8, 0.6, z - si * 8, 12, 0.08, 7, a.a, [1, 1, 1], 0.35, 0); box(Bt, x, 0.58, z, 16, 0.08, 10, a.a, [1, 1, 1], 0.18, 0);
 }
 function addFish(a) {
   var co = Math.cos(a.a), si = Math.sin(a.a);
@@ -1420,6 +1456,21 @@ function addSign(cx, cz, half, yc, w) {
     [A, B2, C2, A, C2, D].forEach(function (v) { signQ.push(v[0], v[1], v[2], v[3], v[4]); });
   });
 }
+function palmTree(S, ST, x, z, sd) {
+  var ang = (sd >> 4) * 0.8, lean = 8 + (sd & 7) * 2.2, dx = Math.cos(ang), dz = Math.sin(ang), pts = [], i, trunk = C('#8a6a44'), leaf = C('#3f8f3a'), leaf2 = C('#2f7a2c');
+  for (i = 0; i <= 5; i++) { var t = i / 5; pts.push([x + dx * lean * t * t, 1.2 + t * 50, z + dz * lean * t * t]); }
+  for (i = 0; i < 5; i++) limb(S, pts[i][0], pts[i][1], pts[i][2], pts[i + 1][0], pts[i + 1][1], pts[i + 1][2], 2.8 - i * 0.3, 2.5 - i * 0.3, i % 2 ? trunk : Cm(trunk, 0.85), 0);
+  var tp = pts[5];
+  for (i = 0; i < 9; i++) {
+    var a = i / 9 * TAU + sd * 0.1, ca = Math.cos(a), sa = Math.sin(a), px = -sa, pz = ca, L1 = 14, L2 = 30;
+    var m = [tp[0] + ca * L1, tp[1] + 3, tp[2] + sa * L1], e = [tp[0] + ca * L2, tp[1] - 9, tp[2] + sa * L2], col = i % 2 ? leaf : leaf2;
+    Q(S, tp[0] + px * 1.2, tp[1], tp[2] + pz * 1.2, m[0] + px * 4.5, m[1], m[2] + pz * 4.5, m[0] - px * 4.5, m[1], m[2] - pz * 4.5, tp[0] - px * 1.2, tp[1], tp[2] - pz * 1.2, 0, 1, 0, col, 1, 0);
+    Q(S, m[0] + px * 4.5, m[1], m[2] + pz * 4.5, e[0] + px * 0.6, e[1], e[2] + pz * 0.6, e[0] - px * 0.6, e[1], e[2] - pz * 0.6, m[0] - px * 4.5, m[1], m[2] - pz * 4.5, 0, 1, 0, col, 1, 0);
+  }
+  for (i = 0; i < 3; i++) sphere(S, tp[0] + Math.cos(i * 2.1) * 2.6, tp[1] - 2.5, tp[2] + Math.sin(i * 2.1) * 2.6, 1.8, 1.8, 1.8, 0, C('#5a3a1e'), 5, 3);
+  disc(ST, tp[0] + 18, tp[2] + 14, 1.5, 22, [0, 0, 0], 0.25, 0, 10);
+  addPole(x, z, 3);
+}
 function buildStatic() {
   var S = mk(10000000), ST = mk(720000), SG = mk(100000), tx, ty, R = mulberry(4242);
   var roadC = C('#2a2d35'), yel = C('#d9aa32'), edge = C('#cfcfc8'), zebraC = C('#e8e8de'), curbC = C('#5d5d63');
@@ -1482,6 +1533,7 @@ function buildStatic() {
     if (tS === G_SAND) {
       var dS = detail[ty * N + tx]; flat(S, xS, yS, xS + T, yS + T, 1.3, (dS & 1) ? C('#d6c48e') : C('#cfbc84'), 1, 0);
       [[0, -1], [0, 1], [-1, 0], [1, 0]].forEach(function (o) { if (tileAt(tx + o[0], ty + o[1]) !== G_SEA) return; var fx0 = o[0] > 0 ? xS + T : o[0] < 0 ? xS - 10 : xS, fx1 = o[0] > 0 ? xS + T + 10 : o[0] < 0 ? xS : xS + T, fz0 = o[1] > 0 ? yS + T : o[1] < 0 ? yS - 10 : yS, fz1 = o[1] > 0 ? yS + T + 10 : o[1] < 0 ? yS : yS + T; flat(ST, fx0, fz0, fx1, fz1, 0.55, [0.95, 0.97, 1], 0.45, 0); });
+      if ((dS & 15) === 9 && tileAt(tx - 1, ty) !== G_ROAD && tileAt(tx + 1, ty) !== G_ROAD) palmTree(S, ST, xS + 20 + (dS >> 5) * 3, yS + 30, dS);
       if ((dS & 31) === 5) { cyl(S, xS + 32, yS + 32, 1, 26, 1, C('#cfcfcf'), 1, 0, 6); frus(S, xS + 32, yS + 32, (dS & 7) * 0.4, 0, 0, 22, 30, 30, 1, 1, 0, 7, (dS & 64) ? C('#e63946') : C('#2a9d8f'), 1, 0, (dS & 64) ? C('#f1faee') : C('#e9c46a')); box(S, xS + 32 + 14, 1.3, yS + 32, 20, 3, 8, 0.3, C('#f2f2f2'), 1, 0); }
     } else if (tS === G_DOCK) {
       flat(S, xS, yS + 8, xS + T, yS + T - 8, 3.2, C('#8a6a48'), 1, 0); for (var pl = 0; pl < 8; pl++) flat(S, xS + pl * 8, yS + 8, xS + pl * 8 + 1, yS + T - 8, 3.25, C('#5a4430'), 1, 0);
@@ -2010,9 +2062,10 @@ function addPersonLow(x, z, a, colHex, down) {
   if (down) { box(Bo, x, 2, z, 15, 4, 8, a, col, 1, 0); return; }
   boxL(Bo, x, z, a, 0, 0, 2, 5, 11, 10, col, 1, 0); boxL(Bo, x, z, a, 0, 0, 13, 6, 6, 6, SKINS[1], 1, 0); boxL(Bo, x, z, a, 0, 0, 2, 4, 7, 7, PANTS[1], 1, 0);
 }
-function addPerson(x, z, a, colHex, ph, down, isP, sd, amp) {
+function addPerson(x, z, a, colHex, ph, down, isP, sd, amp, swim) {
   var B = Bo, co = Math.cos(a), si = Math.sin(a), top = C(colHex), i;
   var skin = SKINS[Math.floor(sd * 97) % 5], hair = HAIRS[Math.floor(sd * 131) % 6], pants = PANTS[Math.floor(sd * 53) % 5], shoe = SHOES[Math.floor(sd * 29) % 3], style = Math.floor(sd * 17) % 4, long = (Math.floor(sd * 7) % 2) === 0, sleeve = (Math.floor(sd * 11) % 3) === 0;
+  if (swim) { top = skin; pants = swim; shoe = skin; sleeve = true; }
   if (isP) { skin = SKINS[1]; hair = HAIRS[0]; pants = C('#2d3f66'); shoe = C('#f2f2f2'); style = 0; long = false; sleeve = false; }
   if (down) amp = 0;
   box(Bt, x, 0.9, z, 15, 0.1, 13, a, [0, 0, 0], 0.4, 0);
@@ -2100,8 +2153,8 @@ function buildDynamic() {
   });
   cyl(Bt, GARAGE.x, GARAGE.y, 2, 70, 80, [0.3, 0.9, 0.65], 0.10, 2, 18);
   aircraft.forEach(function (a) { if (Math.abs(a.x - cam.x) > 3200 || Math.abs(a.y - cam.y) > 3200) return; if (a.kind === 'plane') addPlane(a); else addHeli(a); });
-  animals.forEach(function (a) { if (Math.abs(a.x - cam.x) + Math.abs(a.y - cam.y) > 750) return; if (a.kind === 'dog' || a.kind === 'cow' || a.kind === 'sheep') addDog(a); else if (a.kind === 'cat') addCat(a); else if (a.kind === 'bird') addBird(a); else if (a.kind === 'fish') addFish(a); else if (a.kind === 'dolphin') addDolphin(a); else addDuck(a); });
-  peds.forEach(function (p) { if (p.x < x0 || p.x > x1 || p.y < y0 || p.y > y1) return; var far = Math.abs(p.x - cam.x) + Math.abs(p.y - cam.y) > 800; if (far) addPersonLow(p.x, p.y, p.a, p.col, p.state === 'down'); else { if (p.sd === undefined) p.sd = Math.random(); addPerson(p.x, p.y, p.a, p.col, p.ph, p.state === 'down', false, p.sd, p.state === 'flee' ? 0.95 : 0.55); } });
+  animals.forEach(function (a) { if (Math.abs(a.x - cam.x) + Math.abs(a.y - cam.y) > 750) return; if (a.kind === 'dog' || a.kind === 'cow' || a.kind === 'sheep') addDog(a); else if (a.kind === 'cat') addCat(a); else if (a.kind === 'bird') addBird(a); else if (a.kind === 'fish') addFish(a); else if (a.kind === 'swim') addSwimmer(a); else if (a.kind === 'dolphin') addDolphin(a); else addDuck(a); });
+  peds.forEach(function (p) { if (p.x < x0 || p.x > x1 || p.y < y0 || p.y > y1) return; var far = Math.abs(p.x - cam.x) + Math.abs(p.y - cam.y) > 800; if (far) addPersonLow(p.x, p.y, p.a, p.col, p.state === 'down'); else { if (p.sd === undefined) p.sd = Math.random(); if (p.lie) box(Bo, p.x, groundY(p.x, p.y) - 0.6, p.y, 30, 0.5, 14, p.a, C(p.towel), 1, 0); addPerson(p.x, p.y, p.a, p.col, p.ph, p.state === 'down' || p.lie, false, p.sd, p.state === 'flee' ? 0.95 : 0.55, p.sw); } });
   var RC = 1100;
   cars.forEach(function (c) { if (Math.abs(c.x - cam.x) > RC || Math.abs(c.y - cam.y) > RC) return; addCar(c); });
   if (!P.car) addPerson(P.x, P.y, P.a, '#c9c3b0', P.walk, false, true, 0.5, (P.vx || P.vy) ? 0.7 : 0);
@@ -2319,7 +2372,7 @@ function drawMenu() {
   txt(state === 'menu' ? 'RUE NOIRE' : state === 'pause' ? 'PAUSE' : 'VOUS ÊTES LE ROI DE LA VILLE', cx, y, Math.min(64 * u, W / (state === 'win' ? 14 : 7)), '#ffd60a', 'center');
   ctx.shadowBlur = 0;
   if (state === 'menu') {
-    txt('Développé par Benoit Rousseaux', cx, y + 32 * u, 18 * u, '#ffffff', 'center'); txt('Version 5.7', W - 16, H - 16, 14 * u * 0.9, '#ffd60a', 'right', false);
+    txt('Développé par Benoit Rousseaux', cx, y + 32 * u, 18 * u, '#ffffff', 'center'); txt('Version 6', W - 16, H - 16, 14 * u * 0.9, '#ffd60a', 'right', false);
     var lines = ['Volez des voitures, acceptez des missions aux cabines jaunes,', 'échappez à la police et gagnez ' + money(GOAL) + '.'];
     lines.forEach(function (l, i) { txt(l, cx, y + 64 * u + i * 22 * u, 15 * u, '#cfd3da', 'center', false); });
     if (best > 0) txt('Record : ' + money(best), cx, y + 120 * u, 16 * u, '#9bffb0', 'center');

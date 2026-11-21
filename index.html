@@ -297,7 +297,7 @@ var Snd = (function () {
 })();
 
 /* ---------- entrées ---------- */
-var keys = {}, stick = null, btns = {}, act = false, touchMode = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+var jumpReq = false, keys = {}, stick = null, btns = {}, act = false, touchMode = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
 var UI = {};
 function layoutUI() {
   var m = Math.min(W, H);
@@ -318,6 +318,7 @@ function pdown(e) {
   if (inCircle(UI.sound, x, y)) { Snd.toggle(); return; }
   if (inCircle(UI.act, x, y)) { btns[e.pointerId] = 'act'; act = true; return; }
   if (P.car && P.car.air && inCircle(UI.down, x, y)) { btns[e.pointerId] = 'down'; return; }
+  if (!P.car && inCircle(UI.down, x, y)) { jumpReq = true; btns[e.pointerId] = 'jump'; return; }
   if (inCircle(UI.brake, x, y)) { btns[e.pointerId] = P.car ? (P.car.air ? 'up' : 'brake') : 'fire'; return; }
   if (!stick && x < W * 0.6) { stick = { id: e.pointerId, x0: x, y0: y, x: x, y: y }; }
 }
@@ -331,6 +332,7 @@ window.addEventListener('keydown', function (e) {
   if (e.code === 'KeyP' || e.code === 'Escape') { if (state === 'play') { state = 'pause'; Snd.stop(); } else if (state === 'pause') state = 'play'; }
   if (e.code === 'KeyM') Snd.toggle();
   if (e.code === 'KeyF') keys.Fire = true;
+  if (e.code === 'Space' && !e.repeat && !P.car) jumpReq = true;
   if (e.code.indexOf('Arrow') === 0 || e.code === 'Space') e.preventDefault();
 });
 window.addEventListener('keyup', function (e) { keys[e.code] = false; if (e.code === 'KeyF') keys.Fire = false; });
@@ -948,6 +950,7 @@ function nearestCar(r) {
 }
 function enterCar(c) {
   if (c.driver === 'ai' && c.role !== 'parked' && c.t !== 'boat') { var an = Math.atan2(P.y - c.y, P.x - c.x); peds.push({ x: c.x + Math.cos(an + 1.5) * 30, y: c.y + Math.sin(an + 1.5) * 30, a: an + 1.5, sp: 50, col: pick(PED_COLS), state: 'flee', t: 5, ph: 0 }); }
+  P.jh = 0; P.jv = 0;
   var wasCop = c.role === 'cop';
   c.driver = 'player'; c.role = c.air ? 'air' : c.t === 'boat' ? 'boat' : wasCop ? 'cop' : 'civ'; c.ai.mode = 'lane'; P.car = c;
   if (wasCop) { c.col = '#f2f2f2'; addHeat(2); c.stolenCop = true; }
@@ -1043,8 +1046,11 @@ function updatePlayer(dt, inp) {
     driveCar(c, thr, st, inp.brake, dt);
     P.x = c.x; P.y = c.y; P.a = c.a;
   } else {
-    var sp = 118;
-    if (inp.mag > 0.05) { P.vx = inp.mx * sp * Math.min(1, inp.mag * 1.2); P.vy = inp.my * sp * Math.min(1, inp.mag * 1.2); P.a = Math.atan2(inp.my, inp.mx); P.walk += dt * 9; } else { P.vx = P.vy = 0; }
+    P.run = !!(keys.ShiftLeft || keys.ShiftRight) || (!inp.kb && inp.mag > 0.93);
+    var sp = P.run ? 215 : 118;
+    if (jumpReq) { jumpReq = false; if (!P.jh) { P.jv = 165; P.jh = 0.01; Snd.tone(180, 260, 0.08, 0.06, 'triangle'); } }
+    if (P.jh > 0) { P.jv -= 520 * dt; P.jh += P.jv * dt; if (P.jh <= 0) { P.jh = 0; P.jv = 0; Snd.noise(0.06, 0.06, 500); } }
+    if (inp.mag > 0.05) { P.vx = inp.mx * sp * Math.min(1, inp.mag * 1.2); P.vy = inp.my * sp * Math.min(1, inp.mag * 1.2); P.a = Math.atan2(inp.my, inp.mx); P.walk += dt * (P.run ? 15 : 9); } else { P.vx = P.vy = 0; }
     P.x += P.vx * dt; P.y += P.vy * dt;
     var h = pushCircle(P.x, P.y, 9); if (h) { P.x += h.nx * h.pen; P.y += h.ny * h.pen; }
     for (var i = 0; i < cars.length; i++) {
@@ -2178,7 +2184,7 @@ function addPerson(x, z, a, colHex, ph, down, isP, sd, amp, swim) {
   if (down) amp = 0;
   box(Bt, x, 0.9, z, 15, 0.1, 13, a, [0, 0, 0], 0.4, 0);
   function T(lx, ly, lz) {
-    if (!down) return [x + lx * co - lz * si, 2 + ly, z + lx * si + lz * co];
+    if (!down) return [x + lx * co - lz * si, 2 + ly + (isP ? (P.jh || 0) : 0), z + lx * si + lz * co];
     var l2 = ly, y2 = 4.4 + lx; return [x + l2 * co - lz * 1.2 * si, y2, z + l2 * si + lz * 1.2 * co];
   }
   var hipY = 11.4, s, P0, P1, P2, P3;
@@ -2265,7 +2271,7 @@ function buildDynamic() {
   peds.forEach(function (p) { if (p.x < x0 || p.x > x1 || p.y < y0 || p.y > y1) return; var far = Math.abs(p.x - cam.x) + Math.abs(p.y - cam.y) > 800; if (far) addPersonLow(p.x, p.y, p.a, p.col, p.state === 'down'); else { if (p.sd === undefined) p.sd = Math.random(); if (p.lie) box(Bo, p.x, groundY(p.x, p.y) - 0.6, p.y, 30, 0.5, 14, p.a, C(p.towel), 1, 0); addPerson(p.x, p.y, p.a, p.col, p.ph, p.state === 'down' || p.lie, false, p.sd, p.state === 'flee' ? 0.95 : 0.55, p.sw); } });
   var RC = 1100;
   cars.forEach(function (c) { if (Math.abs(c.x - cam.x) > RC || Math.abs(c.y - cam.y) > RC) return; addCar(c); });
-  if (!P.car) addPerson(P.x, P.y, P.a, '#c9c3b0', P.walk, false, true, 0.5, (P.vx || P.vy) ? 0.7 : 0);
+  if (!P.car) addPerson(P.x, P.y, P.a, '#c9c3b0', P.jh > 0 ? 1.2 : P.walk, false, true, 0.5, P.jh > 0 ? 0.45 : (P.vx || P.vy) ? (P.run ? 1.0 : 0.7) : 0);
   tracers.forEach(function (tr) {
     var dx = tr.x1 - tr.x0, dz = tr.y1 - tr.y0, L = Math.hypot(dx, dz) || 1;
     box(Bo, (tr.x0 + tr.x1) / 2, 16.5, (tr.y0 + tr.y1) / 2, L, 0.7, 0.7, Math.atan2(dz, dx), tr.c, 1, 2);
@@ -2453,6 +2459,7 @@ function drawHUD() {
     circBtn(UI.act, lab, Object.keys(btns).some(function (k) { return btns[k] === 'act'; }), P.car || near ? '#ffd60a' : 'rgba(255,255,255,.4)');
     if (P.car && P.car.air) { circBtn(UI.brake, 'MONTER', airUp(), '#4cc9f0'); circBtn(UI.down, 'DESCENDRE', airDown(), '#ffd60a'); }
     else if (P.car) circBtn(UI.brake, 'FREIN', getBrake(), '#ff6b6b');
+    if (!P.car) circBtn(UI.down, 'SAUT', P.jh > 0, '#9bffb0');
     else circBtn(UI.brake, 'TIR', Object.keys(btns).some(function (k) { return btns[k] === 'fire'; }) || !!keys.Fire, P.ammo > 0 ? '#ff3b3b' : 'rgba(255,255,255,.35)');
   }
   if (overlay) {
@@ -2482,7 +2489,7 @@ function drawMenu() {
   txt(state === 'menu' ? 'RUE NOIRE' : state === 'pause' ? 'PAUSE' : 'VOUS ÊTES LE ROI DE LA VILLE', cx, y, Math.min(64 * u, W / (state === 'win' ? 14 : 7)), '#ffd60a', 'center');
   ctx.shadowBlur = 0;
   if (state === 'menu') {
-    txt('Développé par Benoit Rousseaux', cx, y + 32 * u, 18 * u, '#ffffff', 'center'); txt('Version 7', W - 16, H - 16, 14 * u * 0.9, '#ffd60a', 'right', false);
+    txt('Développé par Benoit Rousseaux', cx, y + 32 * u, 18 * u, '#ffffff', 'center'); txt('Version 7.1', W - 16, H - 16, 14 * u * 0.9, '#ffd60a', 'right', false);
     var lines = ['Volez des voitures, acceptez des missions aux cabines jaunes,', 'échappez à la police et gagnez ' + money(GOAL) + '.'];
     lines.forEach(function (l, i) { txt(l, cx, y + 64 * u + i * 22 * u, 15 * u, '#cfd3da', 'center', false); });
     if (best > 0) txt('Record : ' + money(best), cx, y + 120 * u, 16 * u, '#9bffb0', 'center');
@@ -2511,7 +2518,7 @@ function drawMenu() {
   }
   if (state === 'menu') {
     button('JOUER', by, startGame);
-    if (!touchMode) txt('Clavier : flèches ou ZQSD · E : entrer/sortir · F : tirer · Espace : frein · P : pause', cx, by + 90 * u, 14 * u * 0.9, '#bfc4cc', 'center', false);
+    if (!touchMode) txt('Clavier : flèches ou ZQSD · E : entrer/sortir · F : tirer · Maj : courir · Espace : sauter/frein · P : pause', cx, by + 90 * u, 14 * u * 0.9, '#bfc4cc', 'center', false);
     txt('Jeu original, inspiré des classiques d\'arcade vus de dessus.', cx, H - 22, 12 * u * 0.9, '#8a909a', 'center', false);
   } else if (state === 'pause') {
     button('REPRENDRE', by, function () { state = 'play'; });

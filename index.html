@@ -114,8 +114,8 @@ function genMap() {
   var pierY = my + 4, pierX0 = coastX(pierY) - 2;
   for (tx = pierX0; tx < pierX0 + 9; tx++) map[pierY * N + tx] = G_DOCK;
   for (ty = my + 2; ty < pierY; ty++) for (tx = cEnd - 2; tx < pierX0 + 1; tx++) if (map[ty * N + tx] !== G_SEA) map[ty * N + tx] = G_SAND;
-  MARINA.x = (pierX0 + 1) * T; MARINA.y = (pierY + 0.5) * T;
-  for (var bq = 0; bq < 4; bq++) boatSpots.push({ x: (pierX0 + 3 + bq * 1.6) * T, y: (pierY + (bq % 2 ? 1.25 : -0.25)) * T, a: 0 });
+  MARINA.x = (pierX0 + 1) * T; MARINA.y = (pierY + 0.5) * T; MARINA.px0 = pierX0; MARINA.py = pierY;
+  for (var bq = 0; bq < 4; bq++) boatSpots.push({ x: (pierX0 + 3 + bq * 1.6) * T, y: (pierY - 0.25) * T, a: 0 });
   for (by = CB0; by <= CB1; by++) for (bx = CB0; bx <= CB1; bx++) {
     var ox = bx * 8 + 3, oy = by * 8 + 3, role;
     if (bx === CC && by === CC) role = 'plaza';
@@ -217,6 +217,7 @@ var CAR_TYPES = [
   { n: 'sport', len: 48, max: 285, acc: 340, cols: ['#d62828', '#111827', '#f77f00', '#0a9396'] },
   { n: 'camionnette', len: 58, max: 165, acc: 200, cols: ['#e5e5e5', '#8d99ae', '#6b705c', '#bc6c25'] }
 ];
+var YACHT = { n: 'yacht', len: 120, max: 200, acc: 120, cols: ['#f6f6f2'] }, YREF = null;
 var BOAT = { n: 'boat', len: 56, max: 265, acc: 240, cols: ['#f2f2f2', '#1f6fff', '#e10600', '#ffcc00', '#14213d'] };
 var SUPER = { n: 'super', len: 52, max: 370, acc: 480, cols: ['#e10600', '#ffcc00', '#7ac70c', '#ff6a00', '#1f6fff', '#f2f2f2', '#9b30ff'] };
 
@@ -351,7 +352,7 @@ function driveCar(c, thr, st, brake, dt) {
   if (brake) vf *= Math.exp(-3.2 * dt);
   c.slip = Math.abs(vl) + (brake && Math.abs(vf) > 120 ? 60 : 0);
   vl *= Math.exp(-(bt ? 1.7 : brake ? 2.2 : 9) * dt);
-  var turn = st * (bt ? 1.8 : 2.5) * clamp(Math.abs(vf) / (bt ? 30 : 80), 0, 1) / (1 + Math.abs(vf) / 380) * (vf >= 0 ? 1 : -1);
+  var turn = st * (bt ? (c.yacht ? 1.0 : 1.8) : 2.5) * clamp(Math.abs(vf) / (bt ? 30 : 80), 0, 1) / (1 + Math.abs(vf) / 380) * (vf >= 0 ? 1 : -1);
   c.a += (turn + c.w) * dt; c.w *= Math.exp(-5 * dt);
   fx = Math.cos(c.a); fy = Math.sin(c.a);
   c.vx = fx * vf - fy * vl; c.vy = fy * vf + fx * vl;
@@ -893,7 +894,7 @@ function addDuck(a) {
 /* ---------- joueur ---------- */
 function nearestCar(r) {
   var b = null, bd = r;
-  cars.forEach(function (c) { if (c.dead || c === P.car) return; var d = dist(c.x, c.y, P.x, P.y); if (d < bd + c.len * 0.2) { bd = d; b = c; } });
+  cars.forEach(function (c) { if (c.dead || c === P.car) return; var d = dist(c.x, c.y, P.x, P.y) - c.len * (c.yacht ? 0.25 : 0.2); if (d < bd) { bd = d; b = c; } });
   return b;
 }
 function enterCar(c) {
@@ -1140,6 +1141,7 @@ function startGame() {
   var n = 0, tries = 0;
   while (n < 4 && tries++ < 200) { var s = pick(lotSpots); if (dist(s.x, s.y, P.x, P.y) < 700 && dist(s.x, s.y, P.x, P.y) > 140) { var c = newCar(s.x, s.y, s.a, null, 'parked'); cars.push(c); n++; } }
   cars.push(newCar(HOSPITAL.x - 95, HOSPITAL.y + 95, 0, SUPER, 'parked'));
+  YREF = newCar((MARINA.px0 + 5.8) * T, MARINA.y + 50, 0, YACHT, 'boat'); YREF.t = 'boat'; YREF.yacht = true; YREF.driver = 'none'; YREF.hp = 400; cars.push(YREF);
   boatSpots.forEach(function (bs) { var b = newCar(bs.x, bs.y, bs.a, BOAT, 'boat'); b.driver = 'none'; cars.push(b); });
   for (var ab = 0; ab < 5; ab++) { var spb = seaPoint(MARINA.x + 1500, MARINA.y, 200, 2500); if (spb) { var b2 = newCar(spb[0], spb[1], rnd(0, TAU), BOAT, 'boat'); b2.driver = 'ai'; cars.push(b2); } }
   [[-95, -95, 0], [95, 95, Math.PI], [95, -95, Math.PI / 2]].forEach(function (q, qi) { if (n >= 3) return; var c2 = newCar(HOSPITAL.x + q[0], HOSPITAL.y + q[1], q[2], qi === 0 ? SUPER : CAR_TYPES[qi % CAR_TYPES.length], 'parked'); cars.push(c2); n++; });
@@ -1198,7 +1200,7 @@ function updateGame(dt) {
   var tx = P.x + (P.car ? P.car.vx * 0.12 : 0), ty = P.y + (P.car ? P.car.vy * 0.12 : 0), k = 1 - Math.exp(-9 * dt);
   cam.x += (tx - cam.x) * k; cam.y += (ty - cam.y) * k;
   var kz = 1 - Math.exp(-2 * dt);
-  var dT = P.car ? 175 + sp01 * 85 : 112 + mv * 12, hT = P.car ? 135 + sp01 * 55 : 68 + mv * 6, dMax = dT, cyw = Math.cos(cam.yaw), syw = Math.sin(cam.yaw);
+  var dT = P.car ? 175 + sp01 * 85 + (P.car.yacht ? 110 : 0) : 112 + mv * 12, hT = P.car ? 135 + sp01 * 55 : 68 + mv * 6, dMax = dT, cyw = Math.cos(cam.yaw), syw = Math.sin(cam.yaw);
   for (var st2 = 1; st2 <= 14; st2++) {
     var tt = st2 / 14, qx = P.x - cyw * dT * tt, qz = P.y - syw * dT * tt, qtx = Math.floor(qx / T), qty = Math.floor(qz / T);
     if (qtx < 0 || qty < 0 || qtx >= N || qty >= N) continue;
@@ -1702,10 +1704,10 @@ function drawChunks(list, ex, ez, fx, fz) {
     drawBuf(c.vbo, null, c.n);
   }
 }
-var progT = null, UT = {}, vboSign = null, texSign = null;
+var progT = null, UT = {}, vboSign = null, texSign = null, texGreg = null, vboGreg = null;
 function initSigns() {
   var TVS = 'attribute vec3 aP;attribute vec2 aT;uniform mat4 uVP;varying vec2 vT;varying vec3 vP;void main(){vT=aT;vP=aP;gl_Position=uVP*vec4(aP,1.0);}';
-  var TFS = 'precision mediump float;uniform sampler2D uTex;uniform vec3 uEye;uniform vec3 uFog;uniform vec2 uFogNF;varying vec2 vT;varying vec3 vP;void main(){vec4 c=texture2D(uTex,vT);float f=smoothstep(uFogNF.x,uFogNF.y,length(uEye-vP));gl_FragColor=vec4(mix(c.rgb,uFog,f*0.8),1.0);}';
+  var TFS = 'precision mediump float;uniform sampler2D uTex;uniform vec3 uEye;uniform vec3 uFog;uniform vec2 uFogNF;varying vec2 vT;varying vec3 vP;void main(){vec4 c=texture2D(uTex,vT);if(c.a<0.08)discard;float f=smoothstep(uFogNF.x,uFogNF.y,length(uEye-vP));gl_FragColor=vec4(mix(c.rgb,uFog,f*0.8),c.a);}';
   function sh(type, src) { var x = gl.createShader(type); gl.shaderSource(x, src); gl.compileShader(x); if (!gl.getShaderParameter(x, gl.COMPILE_STATUS)) console.log('SHADERERR ' + gl.getShaderInfoLog(x)); return x; }
   progT = gl.createProgram(); gl.attachShader(progT, sh(gl.VERTEX_SHADER, TVS)); gl.attachShader(progT, sh(gl.FRAGMENT_SHADER, TFS)); gl.linkProgram(progT);
   if (!gl.getProgramParameter(progT, gl.LINK_STATUS)) { progT = null; return; }
@@ -1719,9 +1721,34 @@ function initSigns() {
   texSign = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, texSign); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, c);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   vboSign = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vboSign); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(signQ), gl.STATIC_DRAW);
+  var c2 = document.createElement('canvas'); c2.width = 512; c2.height = 128; var g2 = c2.getContext('2d');
+  g2.font = 'italic bold 92px Georgia, "Times New Roman", serif'; g2.textAlign = 'center'; g2.textBaseline = 'middle';
+  g2.lineWidth = 8; g2.strokeStyle = '#d4af37'; g2.strokeText('Le Greg', 256, 68); g2.fillStyle = '#14213d'; g2.fillText('Le Greg', 256, 68);
+  texGreg = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, texGreg); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, c2);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  vboGreg = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vboGreg); gl.bufferData(gl.ARRAY_BUFFER, 4 * 5 * 18, gl.DYNAMIC_DRAW);
+}
+function gregQuads() {
+  var y = YREF, out = [], co = Math.cos(y.a), si = Math.sin(y.a), base = y.base === undefined ? -2.2 : y.base;
+  function q(lx, lz, ly, nx, nz, w, h) {
+    var px = y.x + lx * co - lz * si, pz = y.y + lx * si + lz * co, wx = nx * co - nz * si, wz = nx * si + nz * co, rx = wz, rz = -wx, hw = w / 2, hh = h / 2;
+    var A = [px - rx * hw, ly - hh, pz - rz * hw, 0, 1], B = [px + rx * hw, ly - hh, pz + rz * hw, 1, 1], Cc = [px + rx * hw, ly + hh, pz + rz * hw, 1, 0], D = [px - rx * hw, ly + hh, pz - rz * hw, 0, 0];
+    [A, B, Cc, A, Cc, D].forEach(function (v) { out.push(v[0], v[1], v[2], v[3], v[4]); });
+  }
+  q(y.len * 0.18, 17.2, base + 5.4, 0, 1, 31, 7.6); q(y.len * 0.18, -17.2, base + 5.4, 0, -1, 31, 7.6); q(-y.len * 0.48, 0, base + 6, -1, 0, 22, 5.5);
+  return new Float32Array(out);
 }
 function drawSigns(ex, ey, ez) {
-  if (!progT || !signQ.length || Math.abs(DSN.x - ex) > 3200 || Math.abs(DSN.y - ez) > 3200) return;
+  if (!progT) return;
+  if (YREF && !YREF.dead && Math.abs(YREF.x - ex) < 1500 && Math.abs(YREF.y - ez) < 1500) {
+    for (var j = 0; j < 4; j++) gl.disableVertexAttribArray(j);
+    gl.useProgram(progT); gl.uniformMatrix4fv(UT.uVP, false, VP); gl.uniform3f(UT.uEye, ex, ey, ez); gl.uniform3f(UT.uFog, FOG[0], FOG[1], FOG[2]); gl.uniform2f(UT.uFogNF, WX.fogN, WX.fogF);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, texGreg); gl.uniform1i(UT.uTex, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, vboGreg); gl.bufferSubData(gl.ARRAY_BUFFER, 0, gregQuads());
+    gl.enableVertexAttribArray(UT.aP); gl.vertexAttribPointer(UT.aP, 3, gl.FLOAT, false, 20, 0); gl.enableVertexAttribArray(UT.aT); gl.vertexAttribPointer(UT.aT, 2, gl.FLOAT, false, 20, 12);
+    gl.drawArrays(gl.TRIANGLES, 0, 18); gl.disableVertexAttribArray(UT.aP); gl.disableVertexAttribArray(UT.aT);
+  }
+  if (!signQ.length || Math.abs(DSN.x - ex) > 3200 || Math.abs(DSN.y - ez) > 3200) return;
   for (var i = 0; i < 4; i++) gl.disableVertexAttribArray(i);
   gl.useProgram(progT); gl.uniformMatrix4fv(UT.uVP, false, VP); gl.uniform3f(UT.uEye, ex, ey, ez); gl.uniform3f(UT.uFog, FOG[0], FOG[1], FOG[2]); gl.uniform2f(UT.uFogNF, WX.fogN, WX.fogF);
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, texSign); gl.uniform1i(UT.uTex, 0);
@@ -1846,9 +1873,33 @@ function addHeli(a) {
     }
   }
 }
+function addYacht(c) {
+  var L = c.len, a = c.a, x = c.x, z = c.y, cs = Math.cos(a), sn = Math.sin(a), wh = c.dead ? [0.2, 0.2, 0.2] : [0.95, 0.95, 0.93], navy = C('#14213d'), teak = C('#a87b4f'), chrome = [0.8, 0.82, 0.86];
+  var base = -2.2 + Math.sin(time * 1.1 + x * 0.01) * 0.5; c.base = base;
+  frus(Bo, x, z, a, -L * 0.08, 0, base, L * 0.74, 30, L * 0.78, 34, 0, 9, wh, 1, 3, teak);
+  frus(Bo, x, z, a, L * 0.4, 0, base, 4, 14, L * 0.24, 34, -L * 0.1, 9, wh, 1, 3, teak);
+  boxL(Bo, x, z, a, -L * 0.06, 17.05, base + 2.4, L * 0.74, 1.3, 0.4, navy, 1, 0); boxL(Bo, x, z, a, -L * 0.06, -17.05, base + 2.4, L * 0.74, 1.3, 0.4, navy, 1, 0);
+  boxL(Bo, x, z, a, -L * 0.5, 0, base + 2.5, 8, 1.4, 30, teak, 1, 0);
+  frus(Bo, x, z, a, -L * 0.1, 0, base + 9, L * 0.56, 28, L * 0.5, 26, -L * 0.02, 9, wh, 1, 3);
+  boxL(Bo, x, z, a, -L * 0.1, 13.6, base + 12, L * 0.46, 3.6, 0.7, GLASS, 1, 3); boxL(Bo, x, z, a, -L * 0.1, -13.6, base + 12, L * 0.46, 3.6, 0.7, GLASS, 1, 3);
+  frus(Bo, x, z, a, -L * 0.14, 0, base + 18, L * 0.38, 24, L * 0.3, 21, -L * 0.03, 8, wh, 1, 3);
+  boxL(Bo, x, z, a, -L * 0.15, 11.4, base + 20.5, L * 0.28, 3, 0.7, GLASS, 1, 3); boxL(Bo, x, z, a, -L * 0.15, -11.4, base + 20.5, L * 0.28, 3, 0.7, GLASS, 1, 3);
+  frus(Bo, x, z, a, L * 0.06, 0, base + 18, L * 0.05, 22, L * 0.01, 19, -L * 0.04, 8, GLASS, 1, 3, GLASS);
+  frus(Bo, x, z, a, -L * 0.2, 0, base + 26, L * 0.22, 19, L * 0.2, 18, 0, 2, wh, 1, 3);
+  boxL(Bo, x, z, a, -L * 0.24, 7, base + 28, 2, 12, 2, wh, 1, 0); boxL(Bo, x, z, a, -L * 0.24, -7, base + 28, 2, 12, 2, wh, 1, 0); boxL(Bo, x, z, a, -L * 0.24, 0, base + 39, 3, 2, 16, wh, 1, 0);
+  var rd = [x - cs * L * 0.24, base + 42, z - sn * L * 0.24]; sphere(Bo, rd[0], rd[1], rd[2], 3, 2, 3, a, wh, 6, 3); boxL(Bo, x, z, a, -L * 0.24, 0, base + 44, 1, 0.6, 9, [0.2, 0.2, 0.22], 1, 0);
+  boxL(Bo, x, z, a, L * 0.18, 16.4, base + 12, L * 0.42, 0.5, 0.5, chrome, 1, 3); boxL(Bo, x, z, a, L * 0.18, -16.4, base + 12, L * 0.42, 0.5, 0.5, chrome, 1, 3);
+  for (var rp = 0; rp < 6; rp++) { var lx2 = L * (-0.02 + rp * 0.075); boxL(Bo, x, z, a, lx2, 16.4, base + 9, 0.5, 3, 0.5, chrome, 1, 0); boxL(Bo, x, z, a, lx2, -16.4, base + 9, 0.5, 3, 0.5, chrome, 1, 0); }
+  boxL(Bo, x, z, a, -L * 0.1, 14.2, base + 9.2, L * 0.48, 0.6, 0.6, [1, 0.85, 0.6], 1, 2); boxL(Bo, x, z, a, -L * 0.1, -14.2, base + 9.2, L * 0.48, 0.6, 0.6, [1, 0.85, 0.6], 1, 2);
+  var lx = -sn, lz = cs;
+  spr(x + cs * L * 0.1 + lx * 17, base + 12, z + sn * L * 0.1 + lz * 17, 7, [0.1, 1, 0.3], 0.9); spr(x + cs * L * 0.1 - lx * 17, base + 12, z + sn * L * 0.1 - lz * 17, 7, [1, 0.1, 0.1], 0.9);
+  spr(x - cs * L * 0.24, base + 47, z - sn * L * 0.24, 8, [1, 1, 1], 0.9);
+  if (ENV.lampK > 0.2) glowFlat(Bg, x, z, 0.7, 90, [1, 0.8, 0.55], 0.3 * ENV.lampK);
+}
 function addBoat(c) {
   var L = c.len, a = c.a, x = c.x, z = c.y, cs = Math.cos(a), sn = Math.sin(a), col = c.dead ? C('#2a2a2a') : C(c.col), wh = [0.93, 0.93, 0.9];
   var bob = Math.sin(time * 1.6 + x * 0.01) * 0.8, base = -1.5 + bob;
+  if (c.yacht) addYacht(c); else {
   frus(Bo, x, z, a, -L * 0.06, 0, base, L * 0.72, 14, L * 0.8, 24, 0, 6, col, 1, 3, wh);
   frus(Bo, x, z, a, L * 0.36, 0, base, L * 0.06, 6, L * 0.24, 24, -L * 0.1, 6, col, 1, 3, wh);
   boxL(Bo, x, z, a, -L * 0.06, 0, base + 6, L * 0.78, 0.8, 23, wh, 1, 0);
@@ -1857,6 +1908,7 @@ function addBoat(c) {
   boxL(Bo, x, z, a, -L * 0.48, 0, base + 2, 6, 10, 7, [0.1, 0.1, 0.12], 1, 3);
   boxL(Bo, x, z, a, -L * 0.06, 12.1, base + 3, L * 0.6, 1.2, 0.5, Cm(col, 1.3), 1, 0); boxL(Bo, x, z, a, -L * 0.06, -12.1, base + 3, L * 0.6, 1.2, 0.5, Cm(col, 1.3), 1, 0);
   if (c.driver !== 'none') { spr(x + cs * L * 0.4, base + 10, z + sn * L * 0.4, 9, [1, 0.95, 0.8], 0.7); spr(x - cs * L * 0.48, base + 12, z - sn * L * 0.48, 7, [1, 0.2, 0.2], 0.7); }
+  }
   if (c.speed > 25) {
     var n = Math.min(10, Math.floor(c.speed / 25)), lx = -sn, lz = cs;
     for (var i = 0; i < n; i++) { var d = L * 0.5 + i * 16, sp2 = 5 + i * 3.5, fa = 0.55 * (1 - i / n); box(Bt, x - cs * d + lx * sp2, 0.6, z - sn * d + lz * sp2, 10, 0.1, 5, a + 0.4, [1, 1, 1], fa, 0); box(Bt, x - cs * d - lx * sp2, 0.6, z - sn * d - lz * sp2, 10, 0.1, 5, a - 0.4, [1, 1, 1], fa, 0); box(Bt, x - cs * d, 0.6, z - sn * d, 8, 0.1, 6 + i, a, [1, 1, 1], fa * 0.8, 0); }
@@ -2190,8 +2242,9 @@ function drawHUD() {
   ctx.restore(); ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = 2; rr(ctx, mx, my, ms, ms, 10); ctx.stroke();
   var rN = -(cam.yaw + Math.PI / 2), ndx = Math.sin(rN), ndy = -Math.cos(rN), mcx = mx + ms / 2, mcy = my + ms / 2;
   var md = ms / 2 - 10, sc2 = Math.min(1 / Math.max(Math.abs(ndx), Math.abs(ndy)), 1.42);
-  [['N', 1, '#ff4d4d'], ['S', -1, '#ffffff']].forEach(function (q) {
-    var px = mcx + ndx * md * sc2 * q[1], py = mcy + ndy * md * sc2 * q[1];
+  [['N', 0, -1, '#ff4d4d'], ['S', 0, 1, '#ffffff'], ['E', 1, 0, '#ffffff'], ['O', -1, 0, '#ffffff']].forEach(function (q) {
+    var dx2 = q[1] * Math.cos(rN) - q[2] * Math.sin(rN), dy2 = q[1] * Math.sin(rN) + q[2] * Math.cos(rN), sc3 = Math.min(1 / Math.max(Math.abs(dx2), Math.abs(dy2), 0.001), 1.42);
+    var px = mcx + dx2 * md * sc3, py = mcy + dy2 * md * sc3; q = [q[0], 0, q[3]];
     px = clamp(px, mx + 10, mx + ms - 10); py = clamp(py, my + 10, my + ms - 10);
     ctx.fillStyle = 'rgba(0,0,0,.65)'; ctx.beginPath(); ctx.arc(px, py, 8.5, 0, TAU); ctx.fill();
     ctx.lineWidth = 1.5; ctx.strokeStyle = q[2]; ctx.stroke();
@@ -2266,7 +2319,7 @@ function drawMenu() {
   txt(state === 'menu' ? 'RUE NOIRE' : state === 'pause' ? 'PAUSE' : 'VOUS ÊTES LE ROI DE LA VILLE', cx, y, Math.min(64 * u, W / (state === 'win' ? 14 : 7)), '#ffd60a', 'center');
   ctx.shadowBlur = 0;
   if (state === 'menu') {
-    txt('Développé par Benoit Rousseaux', cx, y + 32 * u, 18 * u, '#ffffff', 'center'); txt('Version 5.6', W - 16, H - 16, 14 * u * 0.9, '#ffd60a', 'right', false);
+    txt('Développé par Benoit Rousseaux', cx, y + 32 * u, 18 * u, '#ffffff', 'center'); txt('Version 5.7', W - 16, H - 16, 14 * u * 0.9, '#ffd60a', 'right', false);
     var lines = ['Volez des voitures, acceptez des missions aux cabines jaunes,', 'échappez à la police et gagnez ' + money(GOAL) + '.'];
     lines.forEach(function (l, i) { txt(l, cx, y + 64 * u + i * 22 * u, 15 * u, '#cfd3da', 'center', false); });
     if (best > 0) txt('Record : ' + money(best), cx, y + 120 * u, 16 * u, '#9bffb0', 'center');
@@ -2344,7 +2397,7 @@ function step(dt) {
   else if (state === 'menu') { time += dt; lastDt = dt; drawMenu(); drawFX(dt); }
   else if (state === 'pause' || state === 'win') { drawMenu(); }
 }
-window.__rn = { aircraft: function () { return aircraft; }, deepSea: deepSea, MARINA: MARINA, setHour: function (h) { hour = h; }, WX: WX, env: function (d) { updateEnv(d); }, ponds: function () { return ponds; }, animals: function () { return animals; }, update: function (d) { updateGame(d); }, P: P, cars: function () { return cars; }, peds: function () { return peds; }, step: step, start: startGame, setState: function (s) { state = s; }, get state() { return state; }, get mission() { return mission; }, keys: keys, act: function () { act = true; }, addHeat: addHeat, startMission: startMission, phones: function () { return phones; }, GARAGE: GARAGE, BANK: BANK, HOSPITAL: HOSPITAL, cam: cam, getTime: function () { return time; } };
+window.__rn = { yacht: function () { return YREF; }, aircraft: function () { return aircraft; }, deepSea: deepSea, MARINA: MARINA, setHour: function (h) { hour = h; }, WX: WX, env: function (d) { updateEnv(d); }, ponds: function () { return ponds; }, animals: function () { return animals; }, update: function (d) { updateGame(d); }, P: P, cars: function () { return cars; }, peds: function () { return peds; }, step: step, start: startGame, setState: function (s) { state = s; }, get state() { return state; }, get mission() { return mission; }, keys: keys, act: function () { act = true; }, addHeat: addHeat, startMission: startMission, phones: function () { return phones; }, GARAGE: GARAGE, BANK: BANK, HOSPITAL: HOSPITAL, cam: cam, getTime: function () { return time; } };
 initGL();
 requestAnimationFrame(frame);
 })();

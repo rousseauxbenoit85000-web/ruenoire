@@ -1124,7 +1124,7 @@ function updateMission(dt) {
 /* ---------- jeu ---------- */
 function startGame() {
   Snd.init();
-  cars = []; peds = []; animals = []; parts = []; floats = []; mission = null; banner = null; overlay = null;
+  cars = []; peds = []; animals = []; aircraft = []; parts = []; floats = []; mission = null; banner = null; overlay = null;
   P.x = HOSPITAL.x; P.y = HOSPITAL.y + 40; P.a = -Math.PI / 2; P.hp = 100; P.money = 0; P.heat = 0; P.car = null; P.bust = 0; P.done = 0; P.vx = P.vy = 0; P.ammo = 36; P.fireT = 0; P.aimT = 0; P.flashT = 0; tracers = [];
   time = 0; hintT = 14; menuInit = false;
   hour = 10; WX.name = WX.force === 'auto' ? 'clair' : WX.force; WX.timer = rnd(80, 170); var wp = WXP[WX.name]; WX.rain = wp[0]; WX.cloud = wp[1]; WX.fogN = wp[2]; WX.fogF = wp[3]; WX.storm = wp[4]; WX.wet = wp[0] > 0.3 ? 1 : 0; updateEnv(0);
@@ -1169,7 +1169,7 @@ function updateGame(dt) {
   for (i = 0; i < cars.length; i++) for (var j = i + 1; j < cars.length; j++) {
     if (dist(cars[i].x, cars[i].y, P.x, P.y) < 1200) collideCars(cars[i], cars[j]);
   }
-  updatePeds(dt); resolvePeople(dt); updateAnimals(dt); updatePickups(dt); updateMission(dt); manageTraffic(dt);
+  updatePeds(dt); resolvePeople(dt); updateAnimals(dt); updateAir(dt); updatePickups(dt); updateMission(dt); manageTraffic(dt);
   // recherche : décroissance, arrestation
   copsShoot(dt);
   for (var tri2 = tracers.length - 1; tri2 >= 0; tri2--) { tracers[tri2].t -= dt; if (tracers[tri2].t <= 0) tracers.splice(tri2, 1); }
@@ -1256,7 +1256,7 @@ var FS = ['#ifdef GL_FRAGMENT_PRECISION_HIGH', 'precision highp float;', '#else'
 'void main(){float k=vK;',
 ' if(k>6.5&&k<7.5){float sy=uRes.y-gl_FragCoord.y;float t=clamp((uHor-sy)/max(uHor,1.0),0.0,1.0);vec3 s=mix(uFog,uZen,pow(t,0.5));',
 '  float st=step(0.9972,h(floor(gl_FragCoord.xy/3.0)))*t*t*uStar;s+=vec3(st*0.9);float sdd=length(gl_FragCoord.xy-uSunS.xy);s+=uSunC*(smoothstep(30.0,24.0,sdd)*1.3+exp(-sdd/170.0)*0.35)*uSunS.z;gl_FragColor=vec4(s,1.0);return;}',
-' vec3 V=normalize(uEye-vP);float dist=length(uEye-vP);float f2=smoothstep(uFogNF.x,uFogNF.y,dist);',
+' vec3 V=normalize(uEye-vP);float dist=length(uEye-vP);float f2=smoothstep(uFogNF.x,uFogNF.y,dist)*mix(1.0,0.4,smoothstep(220.0,420.0,vP.y));',
 ' if(k>4.5&&k<6.5){float g=1.0;if(k<5.5){float r=length(vN.xy);g=max(1.0-r,0.0);g*=g;}gl_FragColor=vec4(vC.rgb,vC.a*g*(1.0-f2)*uGlow);return;}',
 ' vec3 n=normalize(vN);vec3 SUN=uSunD;float d=max(dot(n,SUN),0.0);',
 ' vec3 amb=mix(uAmbG,uAmbS,n.y*0.5+0.5);vec3 lc=amb+uSunC*d;',
@@ -1763,6 +1763,82 @@ function getBrake() { return !!keys.Space || Object.keys(btns).some(function (k)
 
 /* ---------- objets dynamiques ---------- */
 var DARK = [0.07, 0.07, 0.08], GLASS = [0.06, 0.09, 0.15], SKIN = C('#e8bf98'), BUMP = [0.1, 0.1, 0.12];
+/* ---------- ciel : avions et hélicoptères ---------- */
+var aircraft = [], heliSndT = 0;
+function updateAir(dt) {
+  var i, a, planes = 0, helis = 0, cop = null;
+  for (i = aircraft.length - 1; i >= 0; i--) {
+    a = aircraft[i];
+    if (a.kind === 'plane') {
+      planes++; a.x += Math.cos(a.a) * a.sp * dt; a.y += Math.sin(a.a) * a.sp * dt;
+      if (dist(a.x, a.y, P.x, P.y) > 4600) aircraft.splice(i, 1);
+    } else {
+      if (a.cop) cop = a; else helis++;
+      var tx, ty, sp;
+      if (a.cop) {
+        if (P.heat < 1.5) { a.leave = true; }
+        if (a.leave) { tx = a.x + Math.cos(a.a) * 500; ty = a.y + Math.sin(a.a) * 500; sp = 220; if (dist(a.x, a.y, P.x, P.y) > 3000) { aircraft.splice(i, 1); continue; } }
+        else { var off = time * 0.4; tx = P.x + Math.cos(off) * 90; ty = P.y + Math.sin(off) * 90; sp = Math.min(300, 60 + dist(a.x, a.y, tx, ty) * 0.8); }
+      } else {
+        a.t += dt * a.w; tx = a.cx + Math.cos(a.t) * a.r; ty = a.cy + Math.sin(a.t) * a.r; sp = 150;
+        if (dist(a.x, a.y, P.x, P.y) > 3500) { aircraft.splice(i, 1); continue; }
+      }
+      var des = Math.atan2(ty - a.y, tx - a.x), d = dist(a.x, a.y, tx, ty);
+      a.a += wrap(des - a.a) * Math.min(1, dt * 2.2);
+      var v = Math.min(sp, d * 2); a.x += Math.cos(a.a) * v * dt; a.y += Math.sin(a.a) * v * dt; a.v = v;
+      a.rot += dt * 32;
+    }
+  }
+  if (planes < 3 && Math.random() < dt * 0.15) {
+    var an = rnd(0, TAU), sx = P.x + Math.cos(an) * 4200, sy = P.y + Math.sin(an) * 4200, dir = an + Math.PI + rnd(-0.35, 0.35);
+    aircraft.push({ kind: 'plane', x: sx, y: sy, h: rnd(360, 560), a: dir, sp: rnd(330, 420), col: pick(['#f2f2f2', '#e8eef5', '#f5f0e6']), tail: pick(['#d7263d', '#1f6fff', '#ff9f1c', '#2a9d8f']) });
+  }
+  if (helis < 2 && Math.random() < dt * 0.12) {
+    var hc = Math.random() < 0.6 ? { x: (CC * 8 + 4) * T, y: (CC * 8 + 4) * T } : { x: P.x + rnd(-1200, 1200), y: P.y + rnd(-1200, 1200) }, ha = rnd(0, TAU), hr = rnd(350, 900);
+    aircraft.push({ kind: 'heli', x: hc.x + Math.cos(ha) * hr, y: hc.y + Math.sin(ha) * hr, h: rnd(150, 260), a: ha + Math.PI / 2, cx: hc.x, cy: hc.y, r: hr, t: ha, w: (Math.random() < 0.5 ? 1 : -1) * 150 / hr, rot: 0, col: pick(['#d7263d', '#1c1c1e', '#f2f2f2', '#2a6fdb', '#f4c20d']) });
+  }
+  if (!cop && P.heat >= 3) { var ca = rnd(0, TAU); aircraft.push({ kind: 'heli', cop: true, x: P.x + Math.cos(ca) * 1500, y: P.y + Math.sin(ca) * 1500, h: 190, a: ca + Math.PI, rot: 0, col: '#14213d' }); flash('Un hélicoptère de police vous suit !'); }
+  heliSndT -= dt;
+  if (heliSndT <= 0) { var nd = 1e9; aircraft.forEach(function (q) { if (q.kind === 'heli') nd = Math.min(nd, dist(q.x, q.y, P.x, P.y)); }); if (nd < 700) { Snd.noise(0.05, 0.05 * (1 - nd / 700) + 0.01, 220); heliSndT = 0.085; } else heliSndT = 0.3; }
+}
+function addPlane(a) {
+  var co = Math.cos(a.a), si = Math.sin(a.a), x = a.x, z = a.y, y = a.h, col = C(a.col), tc = C(a.tail);
+  function T(lx, ly, lz) { return [x + lx * co - lz * si, y + ly, z + lx * si + lz * co]; }
+  sphere(Bo, x, y, z, 46, 5.5, 5.5, a.a, col, 10, 4);
+  box(Bo, x - co * 2, y - 1.5, z - si * 2, 18, 1.6, 96, a.a, Cm(col, 0.92), 1, 0);
+  box(Bo, x - co * 40, y + 1, z - si * 40, 8, 1.2, 30, a.a, Cm(col, 0.92), 1, 0);
+  frus(Bo, x, z, a.a, -40, 0, y + 2, 14, 1.6, 5, 1.2, -5, 18, tc, 1, 0, tc);
+  [[-22, 1], [22, 1]].forEach(function (q) { var e = T(4, -5.5, q[0]); box(Bo, e[0], e[1], e[2], 12, 4.4, 4.4, a.a, [0.6, 0.62, 0.66], 1, 3); });
+  var l = T(-2, 0, -48), r = T(-2, 0, 48), tl = T(-46, 4, 0), st = Math.floor(time * 1.3) % 2 === 0 && (time * 1.3) % 1 < 0.15;
+  spr(l[0], l[1], l[2], 16, [1, 0.1, 0.1], 0.95); spr(r[0], r[1], r[2], 16, [0.1, 1, 0.3], 0.95);
+  if (st) { spr(tl[0], tl[1], tl[2], 30, [1, 1, 1], 1); spr(x, y - 6, z, 26, [1, 0.2, 0.2], 0.9); }
+  for (var k = 1; k < 9; k++) { var c = T(-48 - k * 22, 0, 0); box(Bt, c[0], c[1], c[2], 22, 2 + k * 0.5, 2 + k * 0.5, a.a, [1, 1, 1], 0.22 * (1 - k / 9), 0); }
+}
+function addHeli(a) {
+  var co = Math.cos(a.a), si = Math.sin(a.a), x = a.x, z = a.y, y = a.h + Math.sin(time * 1.3 + x) * 1.5, col = C(a.col), tilt = clamp((a.v || 0) / 300, 0, 1);
+  function T(lx, ly, lz) { return [x + lx * co - lz * si, y + ly, z + lx * si + lz * co]; }
+  sphere(Bo, x, y, z, 11, 5.5, 5.6, a.a, col, 9, 5);
+  var gl1 = T(6, 0.8, 0); sphere(Bo, gl1[0], gl1[1], gl1[2], 6, 4.2, 4.8, a.a, GLASS, 7, 4);
+  var b0 = T(-8, 1, 0), b1 = T(-28, 3.5, 0); limb(Bo, b0[0], b0[1], b0[2], b1[0], b1[1], b1[2], 2.2, 1.1, col);
+  var fn = T(-28, 3.5, 0); box(Bo, fn[0], fn[1] - 2, fn[2], 4, 7, 0.8, a.a, col, 1, 0);
+  var tr = T(-28, 4.5, 1.6); box(Bo, tr[0], tr[1] - 4, tr[2], 0.6, 8, 0.6, a.a + a.rot * 1.3, [0.15, 0.15, 0.17], 1, 0);
+  [[-1, 1], [1, 1]].forEach(function (q) { var sk = T(0, -6.5, q[0] * 4.5); box(Bo, sk[0], sk[1], sk[2], 18, 0.8, 0.8, a.a, [0.2, 0.2, 0.22], 1, 0); });
+  var mast = T(0, 5.5, 0); box(Bo, mast[0], mast[1], mast[2], 1.4, 2.2, 1.4, 0, [0.2, 0.2, 0.22], 1, 0);
+  for (var bl = 0; bl < 4; bl++) box(Bo, mast[0], mast[1] + 2.2, mast[2], 50, 0.35, 2.2, a.rot + bl * Math.PI / 4 * 2, [0.12, 0.12, 0.14], 1, 0);
+  cyl(Bt, mast[0], mast[2], mast[1] + 2.0, 0.6, 25, [0.3, 0.3, 0.32], 0.12, 0, 16); disc(Bt, mast[0], mast[2], mast[1] + 2.4, 25, [0.3, 0.3, 0.32], 0.12, 0, 16);
+  var gY = groundY(x, z); box(Bt, x, gY + 0.3, z, 30, 0.1, 14, a.a, [0, 0, 0], clamp(0.35 - a.h / 1200, 0.05, 0.3), 0);
+  var bk = Math.floor(time * 1.6) % 2 === 0; spr(T(-28, 6, 0)[0], y + 9, T(-28, 6, 0)[2], 9, [1, 0.15, 0.15], bk ? 0.95 : 0.2);
+  if (a.cop) {
+    var on = Math.floor(time * 6) % 2 === 0, ln = T(2, -5.5, 0);
+    spr(ln[0], ln[1], ln[2], 10, on ? [1, 0.1, 0.1] : [0.2, 0.4, 1], 1);
+    if (ENV.lampK > 0.2 && !a.leave) {
+      var sx = P.x + Math.sin(time * 0.9) * 18, sz = P.y + Math.cos(time * 0.7) * 18, gy2 = groundY(sx, sz);
+      glowFlat(Bg, sx, sz, gy2 + 0.6, 70, [1, 0.97, 0.85], 0.55 * ENV.lampK);
+      var dx = sx - ln[0], dy = gy2 - ln[1], dz = sz - ln[2];
+      for (var sg = 1; sg <= 6; sg++) { var t = sg / 7; spr(ln[0] + dx * t, ln[1] + dy * t, ln[2] + dz * t, 6 + t * 26, [1, 0.97, 0.85], 0.1 * ENV.lampK); }
+    }
+  }
+}
 function addBoat(c) {
   var L = c.len, a = c.a, x = c.x, z = c.y, cs = Math.cos(a), sn = Math.sin(a), col = c.dead ? C('#2a2a2a') : C(c.col), wh = [0.93, 0.93, 0.9];
   var bob = Math.sin(time * 1.6 + x * 0.01) * 0.8, base = -1.5 + bob;
@@ -1964,6 +2040,7 @@ function buildDynamic() {
     cyl(Bt, t.x, t.y, 2, 170, t.r * pul, [1, 0.84, 0.04], 0.2, 2, 18); disc(Bt, t.x, t.y, 2.4, t.r * pul, [1, 0.84, 0.04], 0.3, 2, 18); glowFlat(Bg, t.x, t.y, 2.9, t.r * 1.8, [1, 0.8, 0.1], 0.35);
   });
   cyl(Bt, GARAGE.x, GARAGE.y, 2, 70, 80, [0.3, 0.9, 0.65], 0.10, 2, 18);
+  aircraft.forEach(function (a) { if (Math.abs(a.x - cam.x) > 3200 || Math.abs(a.y - cam.y) > 3200) return; if (a.kind === 'plane') addPlane(a); else addHeli(a); });
   animals.forEach(function (a) { if (Math.abs(a.x - cam.x) + Math.abs(a.y - cam.y) > 750) return; if (a.kind === 'dog' || a.kind === 'cow' || a.kind === 'sheep') addDog(a); else if (a.kind === 'cat') addCat(a); else if (a.kind === 'bird') addBird(a); else if (a.kind === 'fish') addFish(a); else if (a.kind === 'dolphin') addDolphin(a); else addDuck(a); });
   peds.forEach(function (p) { if (p.x < x0 || p.x > x1 || p.y < y0 || p.y > y1) return; var far = Math.abs(p.x - cam.x) + Math.abs(p.y - cam.y) > 800; if (far) addPersonLow(p.x, p.y, p.a, p.col, p.state === 'down'); else { if (p.sd === undefined) p.sd = Math.random(); addPerson(p.x, p.y, p.a, p.col, p.ph, p.state === 'down', false, p.sd, p.state === 'flee' ? 0.95 : 0.55); } });
   var RC = 1100;
@@ -1988,7 +2065,7 @@ function render3d() {
   gl.viewport(0, 0, gb.width, gb.height); gl.clearColor(FOG[0], FOG[1], FOG[2], 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
   var yaw = cam.yaw, ex = cam.x - Math.cos(yaw) * cam.d, ez = cam.y - Math.sin(yaw) * cam.d, ey = cam.h; eyeX = ex; eyeZ = ez;
   var asp = W / H, fovy = (asp < 1.25 ? 2 * Math.atan(Math.tan(29 * Math.PI / 180) * 1.25 / asp) : 58 * Math.PI / 180) + (cam.k || 0) * 0.1;
-  VP = mMul(mPersp(fovy, asp, 10, 3000), mLook([ex, ey, ez], [cam.x + Math.cos(yaw) * cam.ahead, 8, cam.y + Math.sin(yaw) * cam.ahead]));
+  VP = mMul(mPersp(fovy, asp, 10, 3000), mLook([ex, ey, ez], [cam.x + Math.cos(yaw) * cam.ahead, cam.ty || 8, cam.y + Math.sin(yaw) * cam.ahead]));
   var hz = project(cam.x + Math.cos(yaw) * 9000, 0, cam.y + Math.sin(yaw) * 9000), hor = Math.max(1, hz[1] * DPR);
   var sdir = ENV.moon ? [0.4, 0.75, 0.3] : ENV.sun, spp = project(ex + sdir[0] * 2500, ey + sdir[1] * 2500, ez + sdir[2] * 2500);
   ENV.disc = [spp[0] * DPR, (H - spp[1]) * DPR, spp[2] > 0 ? (1 - WX.cloud * 0.9) * (ENV.moon ? 0.5 : 1) * clamp(WX.fogF / 1500, 0, 1) : 0];
@@ -2001,6 +2078,7 @@ function render3d() {
     for (i = 0; i < lamps.length; i++) { var l = lamps[i], d = Math.abs(l.x - fxp) + Math.abs(l.z - fzp); if (d < 700 && ENV.lampK > 0.05) cand.push([d, l.x, (l.h || 38) - 2, l.z, l.h ? 210 : 160, 0.72 * ENV.lampK, 0.5 * ENV.lampK, 0.27 * ENV.lampK]); }
     for (i = 0; i < neons.length; i++) { var nn = neons[i], d2 = Math.abs(nn.x - fxp) + Math.abs(nn.z - fzp); if (d2 < 600) cand.push([d2 + 40, nn.x, nn.y, nn.z, 110, nn.c[0] * 0.8, nn.c[1] * 0.8, nn.c[2] * 0.8]); }
     var flash = Math.floor(time * 6) % 2 === 0;
+    aircraft.forEach(function (a) { if (a.cop && !a.leave && ENV.lampK > 0.2) cand.push([-500, P.x, 30, P.y, 150, 1.3 * ENV.lampK, 1.25 * ENV.lampK, 1.1 * ENV.lampK]); });
     if (P.flashT > 0 && !P.car) cand.push([-999, P.x + Math.cos(P.a) * 14, 20, P.y + Math.sin(P.a) * 14, 140, 1.6, 1.1, 0.5]);
     cars.forEach(function (c) {
       var d3 = Math.abs(c.x - fxp) + Math.abs(c.y - fzp); if (d3 > 700) return;
@@ -2180,7 +2258,7 @@ function drawMenu() {
   txt(state === 'menu' ? 'RUE NOIRE' : state === 'pause' ? 'PAUSE' : 'VOUS ÊTES LE ROI DE LA VILLE', cx, y, Math.min(64 * u, W / (state === 'win' ? 14 : 7)), '#ffd60a', 'center');
   ctx.shadowBlur = 0;
   if (state === 'menu') {
-    txt('Développé par Benoit Rousseaux', cx, y + 32 * u, 18 * u, '#ffffff', 'center'); txt('Version 5.3', W - 16, H - 16, 14 * u * 0.9, '#ffd60a', 'right', false);
+    txt('Développé par Benoit Rousseaux', cx, y + 32 * u, 18 * u, '#ffffff', 'center'); txt('Version 5.5', W - 16, H - 16, 14 * u * 0.9, '#ffd60a', 'right', false);
     var lines = ['Volez des voitures, acceptez des missions aux cabines jaunes,', 'échappez à la police et gagnez ' + money(GOAL) + '.'];
     lines.forEach(function (l, i) { txt(l, cx, y + 64 * u + i * 22 * u, 15 * u, '#cfd3da', 'center', false); });
     if (best > 0) txt('Record : ' + money(best), cx, y + 120 * u, 16 * u, '#9bffb0', 'center');
@@ -2253,11 +2331,12 @@ function step(dt) {
   ctx.clearRect(0, 0, W, H);
   if (!gl) { txt('WebGL requis pour la 3D', W / 2, H / 2, 24, '#fff', 'center'); return; }
   if (state === 'play') { updateEnv(dt); updateGame(dt); render3d(); drawFX(dt); drawHUD(); }
+  else if (state === 'photo') { render3d(); }
   else if (state === 'freeze') { render3d(); drawFX(0); drawHUD(); }
   else if (state === 'menu') { time += dt; lastDt = dt; drawMenu(); drawFX(dt); }
   else if (state === 'pause' || state === 'win') { drawMenu(); }
 }
-window.__rn = { deepSea: deepSea, MARINA: MARINA, setHour: function (h) { hour = h; }, WX: WX, env: function (d) { updateEnv(d); }, ponds: function () { return ponds; }, animals: function () { return animals; }, update: function (d) { updateGame(d); }, P: P, cars: function () { return cars; }, peds: function () { return peds; }, step: step, start: startGame, setState: function (s) { state = s; }, get state() { return state; }, get mission() { return mission; }, keys: keys, act: function () { act = true; }, addHeat: addHeat, startMission: startMission, phones: function () { return phones; }, GARAGE: GARAGE, BANK: BANK, HOSPITAL: HOSPITAL, cam: cam, getTime: function () { return time; } };
+window.__rn = { aircraft: function () { return aircraft; }, deepSea: deepSea, MARINA: MARINA, setHour: function (h) { hour = h; }, WX: WX, env: function (d) { updateEnv(d); }, ponds: function () { return ponds; }, animals: function () { return animals; }, update: function (d) { updateGame(d); }, P: P, cars: function () { return cars; }, peds: function () { return peds; }, step: step, start: startGame, setState: function (s) { state = s; }, get state() { return state; }, get mission() { return mission; }, keys: keys, act: function () { act = true; }, addHeat: addHeat, startMission: startMission, phones: function () { return phones; }, GARAGE: GARAGE, BANK: BANK, HOSPITAL: HOSPITAL, cam: cam, getTime: function () { return time; } };
 initGL();
 requestAnimationFrame(frame);
 })();

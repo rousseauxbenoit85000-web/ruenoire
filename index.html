@@ -58,10 +58,13 @@ function rr(c, x, y, w, h, r) {
 function money(n) { return '$ ' + Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' '); }
 
 /* ---------- monde ---------- */
-var T = 64, NB = 19, N = NB * 8, WORLD = N * T, CB0 = 5, CB1 = 13, CC = 9, RING0 = 2, RING1 = 17;
+var T = 64, NB = 27, N = NB * 8, WORLD = N * T, CB0 = 5, CB1 = 13, CC = 9, RING0 = 2, RING1 = 17;
 function cityTile(tx, ty) { return tx >= CB0 * 8 && tx < (CB1 + 1) * 8 + 2 && ty >= CB0 * 8 && ty < (CB1 + 1) * 8 + 2; }
 function cityNode(ix, iy) { return ix >= CB0 && ix <= CB1 + 1 && iy >= CB0 && iy <= CB1 + 1; }
-var G_ROAD = 0, G_WALK = 1, G_BLD = 2, G_GRASS = 3, G_TREE = 4, G_LOT = 5, G_WATER = 6, G_FIELD = 7;
+var G_ROAD = 0, G_WALK = 1, G_BLD = 2, G_GRASS = 3, G_TREE = 4, G_LOT = 5, G_WATER = 6, G_FIELD = 7, G_SEA = 8, G_SAND = 9, G_DOCK = 10;
+var boatSpots = [], lighthouses = [], MARINA = { x: 0, y: 0 };
+function coastX(ty) { return 176 + Math.round(Math.sin(ty * 0.045) * 9 + Math.sin(ty * 0.13 + 1) * 3); }
+function coastY(tx) { return 176 + Math.round(Math.sin(tx * 0.05 + 2) * 8 + Math.sin(tx * 0.11) * 3); }
 var map = new Uint8Array(N * N), tileH = new Float32Array(N * N);
 var detail = new Uint8Array(N * N);
 var buildings = [], lotSpots = [], walkSpots = [], grassSpots = [], ponds = [], pastureSpots = [], pastures = [], nodes = [], crop = new Uint8Array(N * N), pastureT = new Uint8Array(N * N);
@@ -71,7 +74,8 @@ var ROOFS = ['#8a5a44', '#6d7a8a', '#9a8f7c', '#5f6f63', '#7a5f7a', '#a0675a', '
 function tileAt(tx, ty) { if (tx < 0 || ty < 0 || tx >= N || ty >= N) return G_BLD; return map[ty * N + tx]; }
 function roadDir(ix, iy, d) { var bx = ix * 8, by = iy * 8; if (d === 0) return tileAt(bx + 2, by) === G_ROAD; if (d === 2) return tileAt(bx - 1, by) === G_ROAD; if (d === 1) return tileAt(bx, by + 2) === G_ROAD; return tileAt(bx, by - 1) === G_ROAD; }
 function hwyTile(tx, ty) { return !cityTile(tx, ty) && tileAt(tx, ty) === G_ROAD; }
-function solidTile(t) { return t === G_BLD || t === G_TREE || t === G_WATER; }
+function solidTile(t) { return t === G_BLD || t === G_TREE || t === G_WATER || t === G_SEA; }
+function boatSolid(t) { return t !== G_SEA; }
 
 function genMap() {
   var R = mulberry(20261121), tx, ty, bx, by;
@@ -86,6 +90,24 @@ function genMap() {
     map[ty * N + tx] = t;
     detail[ty * N + tx] = Math.floor(R() * 256);
   }
+  // mer, plages et îles
+  var ISL = [[196, 70, 9], [150, 198, 6]];
+  for (ty = 0; ty < N; ty++) for (tx = 0; tx < N; tx++) {
+    var cxs = coastX(ty), cys = coastY(tx), k0 = ty * N + tx;
+    if (tx > cxs || ty > cys) map[k0] = G_SEA;
+    else if (tx > cxs - 3 || ty > cys - 3) map[k0] = G_SAND;
+    ISL.forEach(function (il) { var dd = Math.hypot(tx - il[0], ty - il[1]); if (dd < il[2]) map[k0] = dd < il[2] - 2.5 ? G_GRASS : G_SAND; });
+  }
+  lighthouses.push({ x: (196 + 0.5) * T, y: (70 + 0.5) * T });
+  map[70 * N + 196] = G_BLD; buildings.push({ x: 196 * T, y: 70 * T, w: T, h: T, col: '#fff', hgt: 10, bank: false, s: 7, preset: 'lighthouse' });
+  // route vers le port (dans l'axe du centre-ville)
+  var my = CC * 8, cEnd = coastX(my) - 3;
+  for (tx = RING1 * 8 + 2; tx < cEnd; tx++) { map[my * N + tx] = G_ROAD; map[(my + 1) * N + tx] = G_ROAD; }
+  var pierY = my + 4, pierX0 = coastX(pierY) - 2;
+  for (tx = pierX0; tx < pierX0 + 9; tx++) map[pierY * N + tx] = G_DOCK;
+  for (ty = my + 2; ty < pierY; ty++) for (tx = cEnd - 2; tx < pierX0 + 1; tx++) if (map[ty * N + tx] !== G_SEA) map[ty * N + tx] = G_SAND;
+  MARINA.x = (pierX0 + 1) * T; MARINA.y = (pierY + 0.5) * T;
+  for (var bq = 0; bq < 4; bq++) boatSpots.push({ x: (pierX0 + 3 + bq * 1.6) * T, y: (pierY + (bq % 2 ? 1.25 : -0.25)) * T, a: 0 });
   for (by = CB0; by <= CB1; by++) for (bx = CB0; bx <= CB1; bx++) {
     var ox = bx * 8 + 3, oy = by * 8 + 3, role;
     if (bx === CC && by === CC) role = 'plaza';
@@ -133,7 +155,7 @@ function genMap() {
     for (j = 0; j < 8; j++) for (i = 0; i < 8; i++) {
       var tx3 = x0 + i, ty3 = y0 + j, k3 = ty3 * N + tx3; if (!freeT(tx3, ty3)) continue;
       if (kind === 'field' || (kind === 'farm' && (i < 2 || i > 5 || j > 5))) { map[k3] = G_FIELD; crop[k3] = cp; }
-      else if (kind === 'forest') { if (R() < 0.5) map[k3] = G_TREE; }
+      else if (kind === 'forest') { if (R() < 0.42) map[k3] = G_TREE; }
       else if (kind === 'meadow') { if (R() < 0.07) map[k3] = G_TREE; }
       else if (kind === 'pasture') { pastureT[k3] = 1; pastureSpots.push({ x: (tx3 + 0.5) * T, y: (ty3 + 0.5) * T }); pst.x0 = Math.min(pst.x0, tx3); pst.y0 = Math.min(pst.y0, ty3); pst.x1 = Math.max(pst.x1, tx3); pst.y1 = Math.max(pst.y1, ty3); }
     }
@@ -151,7 +173,7 @@ function genMap() {
     var nd = 0; for (var dd = 0; dd < 4; dd++) if (roadDir(bx, by, dd)) nd++;
     if (nd >= 3) nodes.push({ ix: bx, iy: by });
   }
-  for (ty = 0; ty < N; ty++) for (tx = 0; tx < N; tx++) { if (map[ty * N + tx] === G_WALK) walkSpots.push({ x: (tx + 0.5) * T, y: (ty + 0.5) * T }); if (map[ty * N + tx] === G_GRASS) grassSpots.push({ x: (tx + 0.5) * T, y: (ty + 0.5) * T }); }
+  for (ty = 0; ty < N; ty++) for (tx = 0; tx < N; tx++) { if (map[ty * N + tx] === G_SAND && (tx * 7 + ty * 13) % 11 === 0) grassSpots.push({ x: (tx + 0.5) * T, y: (ty + 0.5) * T }); if (map[ty * N + tx] === G_WALK) walkSpots.push({ x: (tx + 0.5) * T, y: (ty + 0.5) * T }); if (map[ty * N + tx] === G_GRASS) grassSpots.push({ x: (tx + 0.5) * T, y: (ty + 0.5) * T }); }
 }
 genMap();
 
@@ -159,7 +181,7 @@ genMap();
 var mini = document.createElement('canvas'); mini.width = mini.height = N * 4;
 (function () {
   var m = mini.getContext('2d');
-  var col = { 0: '#2e3036', 1: '#8d8d88', 2: '#566379', 3: '#3d6b3a', 4: '#2f5a2f', 5: '#55575c', 6: '#2f6f9a', 7: '#8a7a3a' };
+  var col = { 0: '#2e3036', 1: '#8d8d88', 2: '#566379', 3: '#3d6b3a', 4: '#2f5a2f', 5: '#55575c', 6: '#2f6f9a', 7: '#8a7a3a', 8: '#1f4f78', 9: '#d8c48a', 10: '#7a5a3a' };
   for (var ty = 0; ty < N; ty++) for (var tx = 0; tx < N; tx++) { m.fillStyle = col[map[ty * N + tx]]; m.fillRect(tx * 4, ty * 4, 4, 4); }
   buildings.forEach(function (b) { if (b.bank) { m.fillStyle = '#e5c766'; m.fillRect(b.x / T * 4, b.y / T * 4, b.w / T * 4, b.h / T * 4); } });
   m.fillStyle = '#e6e6e6'; m.fillRect(HOSPITAL.x / T * 4 - 6, HOSPITAL.y / T * 4 - 2, 12, 4); m.fillRect(HOSPITAL.x / T * 4 - 2, HOSPITAL.y / T * 4 - 6, 4, 12);
@@ -182,6 +204,7 @@ var CAR_TYPES = [
   { n: 'sport', len: 48, max: 285, acc: 340, cols: ['#d62828', '#111827', '#f77f00', '#0a9396'] },
   { n: 'camionnette', len: 58, max: 165, acc: 200, cols: ['#e5e5e5', '#8d99ae', '#6b705c', '#bc6c25'] }
 ];
+var BOAT = { n: 'boat', len: 56, max: 265, acc: 240, cols: ['#f2f2f2', '#1f6fff', '#e10600', '#ffcc00', '#14213d'] };
 var SUPER = { n: 'super', len: 52, max: 370, acc: 480, cols: ['#e10600', '#ffcc00', '#7ac70c', '#ff6a00', '#1f6fff', '#f2f2f2', '#9b30ff'] };
 
 function newCar(x, y, a, type, role) {
@@ -310,17 +333,18 @@ function driveCar(c, thr, st, brake, dt) {
   if (c.dead) { thr = 0; brake = true; }
   if (thr > 0) { if (vf < max) vf += thr * c.acc * dt; }
   else if (thr < 0) { if (vf > 4) vf += thr * 420 * dt; else if (vf > -max * 0.4) vf += thr * c.acc * 0.6 * dt; }
-  vf *= Math.exp(-0.55 * dt);
+  var bt = c.t === 'boat';
+  vf *= Math.exp(-(bt ? 0.95 : 0.55) * dt);
   if (brake) vf *= Math.exp(-3.2 * dt);
   c.slip = Math.abs(vl) + (brake && Math.abs(vf) > 120 ? 60 : 0);
-  vl *= Math.exp(-(brake ? 2.2 : 9) * dt);
-  var turn = st * 2.5 * clamp(Math.abs(vf) / 80, 0, 1) / (1 + Math.abs(vf) / 380) * (vf >= 0 ? 1 : -1);
+  vl *= Math.exp(-(bt ? 1.7 : brake ? 2.2 : 9) * dt);
+  var turn = st * (bt ? 1.8 : 2.5) * clamp(Math.abs(vf) / (bt ? 30 : 80), 0, 1) / (1 + Math.abs(vf) / 380) * (vf >= 0 ? 1 : -1);
   c.a += (turn + c.w) * dt; c.w *= Math.exp(-5 * dt);
   fx = Math.cos(c.a); fy = Math.sin(c.a);
   c.vx = fx * vf - fy * vl; c.vy = fy * vf + fx * vl;
   c.x += c.vx * dt; c.y += c.vy * dt;
   c.speed = Math.abs(vf); c.vf = vf;
-  if (c.slip > 75 && c.speed > 40 && (c === P.car || Math.abs(c.x - P.x) + Math.abs(c.y - P.y) < 500)) {
+  if (!bt && c.slip > 75 && c.speed > 40 && (c === P.car || Math.abs(c.x - P.x) + Math.abs(c.y - P.y) < 500)) {
     var rx = c.x - fx * c.len * 0.3, rz = c.y - fy * c.len * 0.3, gy = groundY(rx, rz) + 0.15;
     skids.push({ x: rx - fy * 11, z: rz + fx * 11, y: gy, a: c.a, l: 18 }, { x: rx + fy * 11, z: rz - fx * 11, y: gy, a: c.a, l: 18 });
     if (skids.length > 700) skids.splice(0, skids.length - 700);
@@ -341,10 +365,11 @@ function pushCircle(px, py, r) {
   if (pb && (!tb || pb.pen > tb.pen)) return pb;
   return tb;
 }
-function pushCircleT(px, py, r) {
+function pushCircleT(px, py, r, sf) {
+  sf = sf || solidTile;
   var tx0 = Math.floor((px - r) / T), tx1 = Math.floor((px + r) / T), ty0 = Math.floor((py - r) / T), ty1 = Math.floor((py + r) / T), best = null;
   for (var ty = ty0; ty <= ty1; ty++) for (var tx = tx0; tx <= tx1; tx++) {
-    if (!solidTile(tileAt(tx, ty))) continue;
+    if (!sf(tileAt(tx, ty))) continue;
     var qx = clamp(px, tx * T, (tx + 1) * T), qy = clamp(py, ty * T, (ty + 1) * T);
     var dx = px - qx, dy = py - qy, d = Math.hypot(dx, dy);
     if (d < r) {
@@ -368,7 +393,7 @@ function carImpact(c, imp) {
 function collideCarWorld(c) {
   var sh = carShape(c);
   for (var i = 0; i < 3; i++) {
-    var s = carShape(c)[i], hit = pushCircle(s[0], s[1], 12);
+    var s = carShape(c)[i], hit = c.t === 'boat' ? pushCircleT(s[0], s[1], 12, boatSolid) : pushCircle(s[0], s[1], 12);
     if (hit) {
       c.x += hit.nx * hit.pen; c.y += hit.ny * hit.pen;
       var vn = c.vx * hit.nx + c.vy * hit.ny;
@@ -422,6 +447,15 @@ function obstacleAhead(c, range) {
     f = dx * cs + dy * sn; l = -dx * sn + dy * cs; if (f > 6 && f < range * 0.8 && Math.abs(l) < 22) return true;
   }
   return false;
+}
+function seaPoint(x, y, rmin, rmax) { for (var k = 0; k < 30; k++) { var an = rnd(0, TAU), r = rnd(rmin, rmax), px = x + Math.cos(an) * r, py = y + Math.sin(an) * r; if (tileAt(Math.floor(px / T), Math.floor(py / T)) === G_SEA && tileAt(Math.floor(px / T) + 2, Math.floor(py / T)) === G_SEA && tileAt(Math.floor(px / T) - 2, Math.floor(py / T)) === G_SEA) return [px, py]; } return null; }
+function aiBoat(c, dt) {
+  var a = c.ai;
+  if (!a.tx || dist(c.x, c.y, a.tx, a.ty) < 120 || a.stuck > 3) { var sp = seaPoint(c.x, c.y, 600, 1600); if (sp) { a.tx = sp[0]; a.ty = sp[1]; } a.stuck = 0; }
+  var des = Math.atan2(a.ty - c.y, a.tx - c.x), diff = wrap(des - c.a);
+  var px = c.x + Math.cos(c.a) * 140, py = c.y + Math.sin(c.a) * 140; if (tileAt(Math.floor(px / T), Math.floor(py / T)) !== G_SEA) { diff = 1.5; a.stuck += dt; }
+  c.st = clamp(diff * 2, -1, 1); c.thr = Math.abs(diff) > 1.2 ? 0.25 : 0.55; c.br = 0;
+  if (c.speed < 8) a.stuck += dt;
 }
 function aiLane(c, dt) {
   var a = c.ai, tx = Math.floor(c.x / T), ty = Math.floor(c.y / T), ix = clamp(Math.floor(tx / 8), 0, NB - 1), iy = clamp(Math.floor(ty / 8), 0, NB - 1);
@@ -529,7 +563,7 @@ function spawnPed() {
     peds.push({ x: s.x + rnd(-20, 20), y: s.y + rnd(-20, 20), a: rnd(0, TAU), sp: rnd(28, 46), col: pick(PED_COLS), state: 'walk', t: rnd(1, 4), ph: rnd(0, 6) }); return;
   }
 }
-function pedOk(x, y) { var t = tileAt(Math.floor(x / T), Math.floor(y / T)); return t === G_WALK || t === G_GRASS || t === G_LOT; }
+function pedOk(x, y) { var t = tileAt(Math.floor(x / T), Math.floor(y / T)); return t === G_WALK || t === G_GRASS || t === G_LOT || t === G_SAND || t === G_DOCK; }
 function updatePeds(dt) {
   for (var i = peds.length - 1; i >= 0; i--) {
     var p = peds[i], d = dist(p.x, p.y, P.x, P.y);
@@ -636,7 +670,7 @@ function movePed(p, mx, my) {
 /* ---------- animaux : chiens, chats, pigeons, canards ---------- */
 var animals = [], barkT = 0, chirpT = 0;
 var DOGC = ['#8a5a32', '#2a2420', '#d9c6a0', '#6b6b6b', '#b07a3c', '#f0ece2'], CATC = ['#1c1c1e', '#d98a3a', '#8a8a8e', '#f0ece4', '#6b4a32'];
-function animalOk(x, y) { var t = tileAt(Math.floor(x / T), Math.floor(y / T)); return t === G_WALK || t === G_GRASS || t === G_LOT; }
+function animalOk(x, y) { var t = tileAt(Math.floor(x / T), Math.floor(y / T)); return t === G_WALK || t === G_GRASS || t === G_LOT || t === G_SAND; }
 function spotNear(minD, maxD, list) { for (var k = 0; k < 20; k++) { var s = pick(list), d = dist(s.x, s.y, P.x, P.y); if (d >= minD && d <= maxD) return s; } return null; }
 function countA(kind) { var n = 0; for (var i = 0; i < animals.length; i++) if (animals[i].kind === kind) n++; return n; }
 function manageAnimals(dt) {
@@ -803,9 +837,9 @@ function nearestCar(r) {
   return b;
 }
 function enterCar(c) {
-  if (c.driver === 'ai' && c.role !== 'parked') { var an = Math.atan2(P.y - c.y, P.x - c.x); peds.push({ x: c.x + Math.cos(an + 1.5) * 30, y: c.y + Math.sin(an + 1.5) * 30, a: an + 1.5, sp: 50, col: pick(PED_COLS), state: 'flee', t: 5, ph: 0 }); }
+  if (c.driver === 'ai' && c.role !== 'parked' && c.t !== 'boat') { var an = Math.atan2(P.y - c.y, P.x - c.x); peds.push({ x: c.x + Math.cos(an + 1.5) * 30, y: c.y + Math.sin(an + 1.5) * 30, a: an + 1.5, sp: 50, col: pick(PED_COLS), state: 'flee', t: 5, ph: 0 }); }
   var wasCop = c.role === 'cop';
-  c.driver = 'player'; c.role = wasCop ? 'cop' : 'civ'; c.ai.mode = 'lane'; P.car = c;
+  c.driver = 'player'; c.role = c.t === 'boat' ? 'boat' : wasCop ? 'cop' : 'civ'; c.ai.mode = 'lane'; P.car = c;
   if (wasCop) { c.col = '#f2f2f2'; addHeat(2); c.stolenCop = true; }
   var seen = false; cars.forEach(function (o) { if (o.role === 'cop' && o !== c && !o.dead && dist(o.x, o.y, c.x, c.y) < 320) seen = true; });
   if (seen) addHeat(1.0);
@@ -814,6 +848,12 @@ function enterCar(c) {
 }
 function exitCar(forced) {
   var c = P.car; if (!c) return;
+  if (c.t === 'boat') {
+    var bestT = null, bd = 1e9, ctx0 = Math.floor(c.x / T), cty0 = Math.floor(c.y / T);
+    for (var yy = cty0 - 2; yy <= cty0 + 2; yy++) for (var xx = ctx0 - 2; xx <= ctx0 + 2; xx++) { var tt = tileAt(xx, yy); if (tt === G_SEA || solidTile(tt)) continue; var dd = dist((xx + 0.5) * T, (yy + 0.5) * T, c.x, c.y); if (dd < bd) { bd = dd; bestT = [(xx + 0.5) * T, (yy + 0.5) * T]; } }
+    if (!bestT) { if (!forced) flash('Approchez-vous d\'une plage ou d\'un ponton.'); else { P.car = null; respawn('Naufrage !', 0.1); } return; }
+    P.x = bestT[0]; P.y = bestT[1]; P.a = c.a; c.driver = 'none'; c.role = 'boat'; c.vx *= 0.2; c.vy *= 0.2; P.car = null; P.vx = P.vy = 0; return;
+  }
   var side = c.a - Math.PI / 2;
   P.x = c.x + Math.cos(side) * (c.len * 0.35 + 12); P.y = c.y + Math.sin(side) * 24; P.a = side;
   var h = pushCircle(P.x, P.y, 9); if (h) { P.x += h.nx * h.pen; P.y += h.ny * h.pen; }
@@ -822,7 +862,7 @@ function exitCar(forced) {
 }
 function respawn(msg, loss) {
   P.money = Math.max(0, Math.round(P.money * (1 - loss))); P.hp = 100; P.heat = 0; P.bust = 0; P.ammo = loss > 0.2 ? 12 : Math.max(P.ammo, 18);
-  if (P.car) { P.car.driver = 'none'; P.car.role = 'parked'; P.car = null; }
+  if (P.car) { P.car.driver = 'none'; P.car.role = P.car.t === 'boat' ? 'boat' : 'parked'; P.car = null; }
   cars = cars.filter(function (c) { return c.role !== 'cop' || c.ai.mode === 'patrol' ? dist(c.x, c.y, HOSPITAL.x, HOSPITAL.y) > 500 : false; });
   P.x = HOSPITAL.x; P.y = HOSPITAL.y + 30; P.vx = P.vy = 0;
   if (mission) failMission(msg);
@@ -1040,6 +1080,8 @@ function startGame() {
   var n = 0, tries = 0;
   while (n < 4 && tries++ < 200) { var s = pick(lotSpots); if (dist(s.x, s.y, P.x, P.y) < 700 && dist(s.x, s.y, P.x, P.y) > 140) { var c = newCar(s.x, s.y, s.a, null, 'parked'); cars.push(c); n++; } }
   cars.push(newCar(HOSPITAL.x - 95, HOSPITAL.y + 95, 0, SUPER, 'parked'));
+  boatSpots.forEach(function (bs) { var b = newCar(bs.x, bs.y, bs.a, BOAT, 'boat'); b.driver = 'none'; cars.push(b); });
+  for (var ab = 0; ab < 5; ab++) { var spb = seaPoint(MARINA.x + 1500, MARINA.y, 200, 2500); if (spb) { var b2 = newCar(spb[0], spb[1], rnd(0, TAU), BOAT, 'boat'); b2.driver = 'ai'; cars.push(b2); } }
   [[-95, -95, 0], [95, 95, Math.PI], [95, -95, Math.PI / 2]].forEach(function (q, qi) { if (n >= 3) return; var c2 = newCar(HOSPITAL.x + q[0], HOSPITAL.y + q[1], q[2], qi === 0 ? SUPER : CAR_TYPES[qi % CAR_TYPES.length], 'parked'); cars.push(c2); n++; });
   for (var i = 0; i < 16; i++) { var rp = roadPoint(300, 1100); if (rp) { var cc = newCar(rp.x, rp.y, rp.dir * Math.PI / 2, null, 'civ'); cc.vx = Math.cos(cc.a) * 80; cc.vy = Math.sin(cc.a) * 80; cars.push(cc); } }
   for (i = 0; i < 40; i++) spawnPed();
@@ -1060,7 +1102,7 @@ function updateGame(dt) {
     if (c === P.car) continue;
     if (dist(c.x, c.y, P.x, P.y) > 1700) continue;
     if (c.driver === 'ai' && !c.dead) {
-      if (c.role === 'cop' && c.ai.mode === 'chase') aiChase(c, dt); else aiLane(c, dt);
+      if (c.t === 'boat') aiBoat(c, dt); else if (c.role === 'cop' && c.ai.mode === 'chase') aiChase(c, dt); else aiLane(c, dt);
       driveCar(c, c.thr, c.st, c.br, dt);
     } else driveCar(c, 0, 0, c.driver === 'none', dt);
     if (c.role === 'cop') {
@@ -1185,7 +1227,7 @@ var FS = ['#ifdef GL_FRAGMENT_PRECISION_HIGH', 'precision highp float;', '#else'
 '  res=as*lc*(1.0-0.25*uWet);res=mix(res,res*0.5+rf*0.55,pud*0.85);res+=rf*0.12*fr*uWet;}',
 ' else if(k>7.5){vec2 q=vP.xz*0.09;float w1=n2(q+vec2(uTime*0.35,uTime*0.2));float w2=n2(q*2.3-vec2(uTime*0.25,-uTime*0.4));',
 '  vec3 nw=normalize(vec3((w1-0.5)*0.4,1.0,(w2-0.5)*0.4));float fr=pow(1.0-max(dot(nw,V),0.0),3.0);',
-'  res=mix(vec3(0.015,0.05,0.07),uFog*0.85+vec3(0.03,0.03,0.06),0.2+0.65*fr);vec3 R2=reflect(-V,nw);res+=pow(max(dot(R2,SUN),0.0),70.0)*0.6*uSunC;',
+'  res=mix(col*(0.35+0.5*(1.0-uNight)),uFog*0.7+vec3(0.0,0.04,0.08),0.1+0.5*fr);vec3 R2=reflect(-V,nw);res+=pow(max(dot(R2,SUN),0.0),70.0)*0.6*uSunC;',
 '  vec2 cell=floor(vP.xz/7.0);float rp=fract(h(cell)+uTime*1.1);float rr=length(fract(vP.xz/7.0)-0.5);res+=smoothstep(0.04,0.0,abs(rr-rp*0.45))*(1.0-rp)*0.25*uWet;n=nw;}',
 ' else{res=col*lc;if(n.y>0.5)res*=0.9+0.2*n2(vP.xz*0.2);}',
 ' if(uQ>0.5&&(k<1.5||k>2.5)){vec3 acc=vec3(0.0);',
@@ -1204,7 +1246,7 @@ var HEXC = {};
 function C(h) { var c = HEXC[h]; if (!c) { var n = parseInt(h.slice(1), 16); c = HEXC[h] = [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255]; } return c; }
 function Cm(c, f) { return [Math.min(1, c[0] * f), Math.min(1, c[1] * f), Math.min(1, c[2] * f)]; }
 function V(B, x, y, z, nx, ny, nz, c, a, k) {
-  var i = B.n, A = B.a; if (i + 11 > A.length) { if (B.fixed) return; var nA = new Float32Array(A.length * 2); nA.set(A); B.a = A = nA; }
+  var i = B.n, A = B.a; if (i + 11 > A.length) { if (B.fixed) return; var nA = new Float32Array(Math.ceil(A.length * 1.5)); nA.set(A); B.a = A = nA; }
   A[i] = x; A[i + 1] = y; A[i + 2] = z; A[i + 3] = nx; A[i + 4] = ny; A[i + 5] = nz; A[i + 6] = c[0]; A[i + 7] = c[1]; A[i + 8] = c[2]; A[i + 9] = a; A[i + 10] = k; B.n = i + 11;
 }
 function Q(B, x1, y1, z1, x2, y2, z2, x3, y3, z3, x4, y4, z4, nx, ny, nz, c, a, k) {
@@ -1362,10 +1404,26 @@ function buildStatic() {
       flat(S, x + 1, y, x + 3, y + T, 0.9, C('#c9c9c2')); flat(S, x + T - 3, y, x + T - 1, y + T, 0.9, C('#c9c9c2'));
     }
   }
+  // mer : une bande par rangée
+  for (ty = 0; ty < N; ty++) { var runS = -1; for (tx = 0; tx <= N; tx++) { var okS = tx < N && map[ty * N + tx] === G_SEA; if (okS && runS < 0) runS = tx; if (!okS && runS >= 0) { flat(S, runS * T, ty * T, tx * T, ty * T + T, 0.4, [0.12, 0.27, 0.38], 1, 8); runS = -1; } } }
+  flat(S, WORLD, -6000, WORLD + 6000, WORLD + 6000, 0.4, [0.12, 0.27, 0.38], 1, 8); flat(S, -6000, WORLD, WORLD, WORLD + 6000, 0.4, [0.12, 0.27, 0.38], 1, 8);
+  for (ty = 0; ty < N; ty++) for (tx = 0; tx < N; tx++) {
+    var tS = map[ty * N + tx], xS = tx * T, yS = ty * T;
+    if (tS === G_SAND) {
+      var dS = detail[ty * N + tx]; flat(S, xS, yS, xS + T, yS + T, 1.3, (dS & 1) ? C('#d6c48e') : C('#cfbc84'), 1, 0);
+      [[0, -1], [0, 1], [-1, 0], [1, 0]].forEach(function (o) { if (tileAt(tx + o[0], ty + o[1]) !== G_SEA) return; var fx0 = o[0] > 0 ? xS + T : o[0] < 0 ? xS - 10 : xS, fx1 = o[0] > 0 ? xS + T + 10 : o[0] < 0 ? xS : xS + T, fz0 = o[1] > 0 ? yS + T : o[1] < 0 ? yS - 10 : yS, fz1 = o[1] > 0 ? yS + T + 10 : o[1] < 0 ? yS : yS + T; flat(ST, fx0, fz0, fx1, fz1, 0.55, [0.95, 0.97, 1], 0.45, 0); });
+      if ((dS & 31) === 5) { cyl(S, xS + 32, yS + 32, 1, 26, 1, C('#cfcfcf'), 1, 0, 6); frus(S, xS + 32, yS + 32, (dS & 7) * 0.4, 0, 0, 22, 30, 30, 1, 1, 0, 7, (dS & 64) ? C('#e63946') : C('#2a9d8f'), 1, 0, (dS & 64) ? C('#f1faee') : C('#e9c46a')); box(S, xS + 32 + 14, 1.3, yS + 32, 20, 3, 8, 0.3, C('#f2f2f2'), 1, 0); }
+    } else if (tS === G_DOCK) {
+      flat(S, xS, yS + 8, xS + T, yS + T - 8, 3.2, C('#8a6a48'), 1, 0); for (var pl = 0; pl < 8; pl++) flat(S, xS + pl * 8, yS + 8, xS + pl * 8 + 1, yS + T - 8, 3.25, C('#5a4430'), 1, 0);
+      cyl(S, xS + 4, yS + 9, -4, 8, 2.4, C('#5a4430'), 1, 0, 6); cyl(S, xS + 4, yS + T - 9, -4, 8, 2.4, C('#5a4430'), 1, 0, 6);
+      box(S, xS + T / 2, 3.2, yS + 9, T, 5, 1, 0, C('#6b5038'), 1, 0); box(S, xS + T / 2, 3.2, yS + T - 9, T, 5, 1, 0, C('#6b5038'), 1, 0);
+    }
+  }
   // herbe de campagne : une bande par rangée
   for (ty = 0; ty < N; ty++) { var run = -1; for (tx = 0; tx <= N; tx++) { var tg = tx < N ? map[ty * N + tx] : -1, ok3 = tx < N && !cityTile(tx, ty) && (tg === G_GRASS || tg === G_TREE || tg === G_WATER); if (ok3 && run < 0) run = tx; if (!ok3 && run >= 0) { flat(S, run * T, ty * T, tx * T, ty * T + T, 1, (ty & 1) ? C('#30562c') : C('#2d522a'), 1, 0); run = -1; } } }
   // clôtures des prés
   pastures.forEach(function (ps) {
+    if (ps.x1 < 0 || ps.x1 - ps.x0 > 8 || ps.y1 - ps.y0 > 8) return;
     var X0 = ps.x0 * T + 6, X1 = (ps.x1 + 1) * T - 6, Z0 = ps.y0 * T + 6, Z1 = (ps.y1 + 1) * T - 6, fc = C('#8a6a48');
     [[X0, Z0, X1, Z0], [X0, Z1, X1, Z1], [X0, Z0, X0, Z1], [X1, Z0, X1, Z1]].forEach(function (e) {
       var len = Math.hypot(e[2] - e[0], e[3] - e[1]), yaw = e[0] === e[2] ? Math.PI / 2 : 0, cx = (e[0] + e[2]) / 2, cz = (e[1] + e[3]) / 2;
@@ -1410,6 +1468,12 @@ function buildStatic() {
       for (i = 0; i < 6; i++) cyl(S, b.x + 20 + i * (b.w - 40) / 5, b.y + b.h + 6, 2, 40, 4.5, C('#d8d0b8'), 1, 3, 10);
       box(S, cx, 42, b.y + b.h + 4, b.w - 20, 6, 14, 0, C('#cfc6ad'), 1, 0); frus(S, cx, b.y + b.h + 4, 0, 0, 0, 48, b.w - 20, 14, b.w - 20, 1, 0, 14, C('#cfc6ad'), 1, 0);
       rooftop(H, b.w, b.h);
+    } else if (style === 'lighthouse') {
+      base = 0; var lr = 14;
+      for (var sg = 0; sg < 6; sg++) cyl(S, cx, cz, sg * 14, 14, lr - sg * 0.9, sg % 2 ? C('#d7263d') : C('#f2f2f2'), 1, 0, 14);
+      disc(S, cx, cz, 84, 13, C('#2b2d33'), 1, 0, 14); cyl(S, cx, cz, 84, 12, 7, C('#fff2b0'), 1, 2, 12); frus(S, cx, cz, 0, 0, 0, 96, 16, 16, 1, 1, 0, 9, C('#d7263d'), 1, 0, C('#d7263d'));
+      H = 105; base = 105;
+      lamps.push({ x: cx, z: cz, h: 90 });
     } else if (style === 'farmhouse') {
       wc = C('#e8e2d2'); base = 30; var rc2 = C('#8a3b2a');
       box(S, cx, 0, cz, b.w - 10, base, b.h - 10, 0, wc, 1, 0.8, wc); frus(S, cx, cz, 0, 0, 0, base, b.w - 4, b.h - 4, b.w - 20, 1.2, 0, 22, rc2, 1, 0, rc2);
@@ -1466,7 +1530,7 @@ function buildStatic() {
     aoStrip(ST, b.x, b.y, b.x, b.y + b.h, -16, 0, 2.25, 0.4); aoStrip(ST, b.x + b.w, b.y, b.x + b.w, b.y + b.h, 16, 0, 2.25, 0.4);
     if (b.bank) {
       addNeon(S, SG, cx, b.y + b.h, 0, 0.5, b.w, [1, 0.8, 0.25], true); addNeon(S, SG, b.x, cz, 3, 0.5, b.h, [1, 0.8, 0.25], true);
-    } else if (style !== 'house' && r() < 0.6) {
+    } else if (style !== 'house' && style !== 'lighthouse' && style !== 'silo' && style !== 'barn' && style !== 'farmhouse' && r() < 0.6) {
       var side = Math.floor(r() * 4), t2 = 0.25 + r() * 0.5, col = NEONP[Math.floor(r() * NEONP.length)];
       if (side === 0) addNeon(S, SG, b.x + b.w * t2, b.y + b.h, 0, t2, b.w, col, false);
       else if (side === 1) addNeon(S, SG, b.x + b.w * t2, b.y, 1, t2, b.w, col, false);
@@ -1594,7 +1658,25 @@ function getBrake() { return !!keys.Space || Object.keys(btns).some(function (k)
 
 /* ---------- objets dynamiques ---------- */
 var DARK = [0.07, 0.07, 0.08], GLASS = [0.06, 0.09, 0.15], SKIN = C('#e8bf98'), BUMP = [0.1, 0.1, 0.12];
+function addBoat(c) {
+  var L = c.len, a = c.a, x = c.x, z = c.y, cs = Math.cos(a), sn = Math.sin(a), col = c.dead ? C('#2a2a2a') : C(c.col), wh = [0.93, 0.93, 0.9];
+  var bob = Math.sin(time * 1.6 + x * 0.01) * 0.8, base = -1.5 + bob;
+  frus(Bo, x, z, a, -L * 0.06, 0, base, L * 0.72, 14, L * 0.8, 24, 0, 6, col, 1, 3, wh);
+  frus(Bo, x, z, a, L * 0.36, 0, base, L * 0.06, 6, L * 0.24, 24, -L * 0.1, 6, col, 1, 3, wh);
+  boxL(Bo, x, z, a, -L * 0.06, 0, base + 6, L * 0.78, 0.8, 23, wh, 1, 0);
+  frus(Bo, x, z, a, -L * 0.05, 0, base + 6.8, L * 0.26, 16, L * 0.2, 14, -L * 0.03, 6, wh, 1, 3);
+  frus(Bo, x, z, a, L * 0.1, 0, base + 6.8, L * 0.05, 15, L * 0.01, 15, -L * 0.02, 6, GLASS, 1, 3, GLASS);
+  boxL(Bo, x, z, a, -L * 0.48, 0, base + 2, 6, 10, 7, [0.1, 0.1, 0.12], 1, 3);
+  boxL(Bo, x, z, a, -L * 0.06, 12.1, base + 3, L * 0.6, 1.2, 0.5, Cm(col, 1.3), 1, 0); boxL(Bo, x, z, a, -L * 0.06, -12.1, base + 3, L * 0.6, 1.2, 0.5, Cm(col, 1.3), 1, 0);
+  if (c.driver !== 'none') { spr(x + cs * L * 0.4, base + 10, z + sn * L * 0.4, 9, [1, 0.95, 0.8], 0.7); spr(x - cs * L * 0.48, base + 12, z - sn * L * 0.48, 7, [1, 0.2, 0.2], 0.7); }
+  if (c.speed > 25) {
+    var n = Math.min(10, Math.floor(c.speed / 25)), lx = -sn, lz = cs;
+    for (var i = 0; i < n; i++) { var d = L * 0.5 + i * 16, sp2 = 5 + i * 3.5, fa = 0.55 * (1 - i / n); box(Bt, x - cs * d + lx * sp2, 0.6, z - sn * d + lz * sp2, 10, 0.1, 5, a + 0.4, [1, 1, 1], fa, 0); box(Bt, x - cs * d - lx * sp2, 0.6, z - sn * d - lz * sp2, 10, 0.1, 5, a - 0.4, [1, 1, 1], fa, 0); box(Bt, x - cs * d, 0.6, z - sn * d, 8, 0.1, 6 + i, a, [1, 1, 1], fa * 0.8, 0); }
+  }
+  box(Bt, x + cs * L * 0.45, 0.55, z + sn * L * 0.45, 6, 0.1, 18, a, [1, 1, 1], clamp(c.speed / 200, 0, 0.6), 0);
+}
 function addCar(c) {
+  if (c.t === 'boat') { addBoat(c); return; }
   var L = c.len, a = c.a, x = c.x, z = c.y, base = 1.5, dead = c.dead, col = dead ? C('#1c1c1e') : C(c.col), van = c.t === 'camionnette', sport = c.t === 'sport', sup = c.t === 'super', cs = Math.cos(a), sn = Math.sin(a);
   var lit = !dead && c.driver !== 'none', wc = [0.05, 0.05, 0.06], wx = L * 0.31;
   box(Bt, x, 0.9, z, L + 10, 0.1, 30, a, [0, 0, 0], 0.4, 0);
@@ -1736,10 +1818,20 @@ function streak(x, z, y, len, w, c, a) {
   V(B, bx2 - px, y, bz2 - pz, -1, -0.12, 0, c, a, 5); V(B, bx2 + px, y, bz2 + pz, 1, -0.12, 0, c, a, 5); V(B, fx + px, y, fz + pz, 1, 1, 0, c, a, 5);
   V(B, bx2 - px, y, bz2 - pz, -1, -0.12, 0, c, a, 5); V(B, fx + px, y, fz + pz, 1, 1, 0, c, a, 5); V(B, fx - px, y, fz - pz, -1, 1, 0, c, a, 5);
 }
-function groundY(x, z) { var t = tileAt(Math.floor(x / T), Math.floor(z / T)); return t === G_ROAD ? 0.5 : t === G_LOT ? 1.0 : 2.4; }
+function groundY(x, z) { var t = tileAt(Math.floor(x / T), Math.floor(z / T)); return t === G_ROAD ? 0.5 : t === G_LOT ? 1.0 : t === G_SEA ? 0.4 : t === G_SAND ? 1.3 : t === G_DOCK ? 3.2 : 2.4; }
 var TLC = [[0.2, 1, 0.45], [1, 0.72, 0.1], [1, 0.12, 0.1]];
 function buildDynamic() {
   Bo.n = 0; Bt.n = 0; Bg.n = 0; var i, R = 1250, x0 = cam.x - R, x1 = cam.x + R, y0 = cam.y - R, y1 = cam.y + R;
+  lighthouses.forEach(function (lh) {
+    if (Math.abs(lh.x - cam.x) > 3000 || Math.abs(lh.y - cam.y) > 3000) return;
+    var ang = time * 0.9, B = Bg;
+    for (var bm = 0; bm < 2; bm++) {
+      var aa = ang + bm * Math.PI, dx = Math.cos(aa), dz = Math.sin(aa), Lb = 700, px = -dz, pz = dx, cxb = lh.x, czb = lh.y, yb = 90;
+      V(B, cxb + px * 3, yb, czb + pz * 3, -0.1, -1, 0, [1, 0.95, 0.7], 0.5, 6); V(B, cxb - px * 3, yb, czb - pz * 3, 0.1, -1, 0, [1, 0.95, 0.7], 0.5, 6); V(B, cxb + dx * Lb - px * 60, yb - 30, czb + dz * Lb - pz * 60, 0, 0, 0, [1, 0.95, 0.7], 0, 6);
+      V(B, cxb + px * 3, yb, czb + pz * 3, -0.1, -1, 0, [1, 0.95, 0.7], 0.5, 6); V(B, cxb + dx * Lb - px * 60, yb - 30, czb + dz * Lb - pz * 60, 0, 0, 0, [1, 0.95, 0.7], 0, 6); V(B, cxb + dx * Lb + px * 60, yb - 30, czb + dz * Lb + pz * 60, 0, 0, 0, [1, 0.95, 0.7], 0, 6);
+    }
+    spr(lh.x, 90, lh.y, 40, [1, 0.95, 0.7], 0.9);
+  });
   lamps.forEach(function (l) { if (l.x < x0 || l.x > x1 || l.z < y0 || l.z > y1) return; spr(l.x, (l.h || 38), l.z, l.h ? 30 : 22, [1, 0.8, 0.5], 0.75); if (GFX && Math.abs(l.x - cam.x) + Math.abs(l.z - cam.y) < 900) streak(l.x, l.z, 2.5, 150, 13, [1, 0.72, 0.4], 0.32 * ENV.lampK); });
   tlights.forEach(function (q) {
     if (Math.abs(q.x - cam.x) > 900 || Math.abs(q.z - cam.y) > 900) return; var st = tlState(q.ix, q.iy, q.ax), c = TLC[st];
@@ -1973,7 +2065,7 @@ function drawMenu() {
   txt(state === 'menu' ? 'RUE NOIRE' : state === 'pause' ? 'PAUSE' : 'VOUS ÊTES LE ROI DE LA VILLE', cx, y, Math.min(64 * u, W / (state === 'win' ? 14 : 7)), '#ffd60a', 'center');
   ctx.shadowBlur = 0;
   if (state === 'menu') {
-    txt('Développé par Benoit Rousseaux', cx, y + 32 * u, 18 * u, '#ffffff', 'center'); txt('Version 4', W - 16, H - 16, 14 * u * 0.9, '#ffd60a', 'right', false);
+    txt('Développé par Benoit Rousseaux', cx, y + 32 * u, 18 * u, '#ffffff', 'center'); txt('Version 5', W - 16, H - 16, 14 * u * 0.9, '#ffd60a', 'right', false);
     var lines = ['Volez des voitures, acceptez des missions aux cabines jaunes,', 'échappez à la police et gagnez ' + money(GOAL) + '.'];
     lines.forEach(function (l, i) { txt(l, cx, y + 64 * u + i * 22 * u, 15 * u, '#cfd3da', 'center', false); });
     if (best > 0) txt('Record : ' + money(best), cx, y + 120 * u, 16 * u, '#9bffb0', 'center');
@@ -2050,7 +2142,7 @@ function step(dt) {
   else if (state === 'menu') { time += dt; lastDt = dt; drawMenu(); drawFX(dt); }
   else if (state === 'pause' || state === 'win') { drawMenu(); }
 }
-window.__rn = { setHour: function (h) { hour = h; }, WX: WX, env: function (d) { updateEnv(d); }, ponds: function () { return ponds; }, animals: function () { return animals; }, update: function (d) { updateGame(d); }, P: P, cars: function () { return cars; }, peds: function () { return peds; }, step: step, start: startGame, setState: function (s) { state = s; }, get state() { return state; }, get mission() { return mission; }, keys: keys, act: function () { act = true; }, addHeat: addHeat, startMission: startMission, phones: function () { return phones; }, GARAGE: GARAGE, BANK: BANK, HOSPITAL: HOSPITAL, cam: cam, getTime: function () { return time; } };
+window.__rn = { MARINA: MARINA, setHour: function (h) { hour = h; }, WX: WX, env: function (d) { updateEnv(d); }, ponds: function () { return ponds; }, animals: function () { return animals; }, update: function (d) { updateGame(d); }, P: P, cars: function () { return cars; }, peds: function () { return peds; }, step: step, start: startGame, setState: function (s) { state = s; }, get state() { return state; }, get mission() { return mission; }, keys: keys, act: function () { act = true; }, addHeat: addHeat, startMission: startMission, phones: function () { return phones; }, GARAGE: GARAGE, BANK: BANK, HOSPITAL: HOSPITAL, cam: cam, getTime: function () { return time; } };
 initGL();
 requestAnimationFrame(frame);
 })();

@@ -1,0 +1,10 @@
+Rue Noire pour iPhone (application web installable)
+
+1. Créez un nouveau dépôt GitHub (ex. ruenoire) et envoyez-y le CONTENU de ce dossier
+   (index.html doit être à la racine du dépôt).
+2. Settings > Pages > Source : "Deploy from a branch", branche main, dossier / (root) > Save.
+3. Attendez 1 à 2 minutes, puis ouvrez dans Safari sur l'iPhone :
+   https://VOTRE-NOM.github.io/ruenoire/
+4. Bouton Partager > "Sur l'écran d'accueil" > Ajouter.
+5. Lancez Rue Noire depuis l'icône, téléphone tenu à l'horizontale.
+   Le jeu fonctionne ensuite même sans connexion.

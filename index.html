@@ -503,6 +503,77 @@ function updatePeds(dt) {
   if (peds.length < 46 && Math.random() < dt * 6) spawnPed();
 }
 
+/* ---------- collisions entre personnages ---------- */
+var PR = 7.5, GRID = 32, pgrid = {};
+function resolvePeople(dt) {
+  var i, j, p, q, k, gx, gy, dx, dy, d, list, push, ox, oy;
+  pgrid = {};
+  for (i = 0; i < peds.length; i++) { p = peds[i]; k = Math.floor(p.x / GRID) + ',' + Math.floor(p.y / GRID); (pgrid[k] || (pgrid[k] = [])).push(p); }
+  // piéton contre piéton
+  for (i = 0; i < peds.length; i++) {
+    p = peds[i]; gx = Math.floor(p.x / GRID); gy = Math.floor(p.y / GRID);
+    for (var cy = gy - 1; cy <= gy + 1; cy++) for (var cx = gx - 1; cx <= gx + 1; cx++) {
+      list = pgrid[cx + ',' + cy]; if (!list) continue;
+      for (j = 0; j < list.length; j++) {
+        q = list[j]; if (q === p || q.__d) continue;
+        dx = q.x - p.x; dy = q.y - p.y; d = dx * dx + dy * dy;
+        var rr2 = (p.state === 'down' || q.state === 'down') ? (PR + 5) : PR * 2;
+        if (d >= rr2 * rr2) {
+          // évitement : un piéton qui marche contourne celui qui est devant lui
+          if (p.state === 'walk' && d < 900) { var f = dx * Math.cos(p.a) + dy * Math.sin(p.a); if (f > 0) { var side = -dx * Math.sin(p.a) + dy * Math.cos(p.a); p.a += (side > 0 ? -1 : 1) * 2.2 * dt; } }
+          continue;
+        }
+        d = Math.sqrt(d) || 0.01; push = (rr2 - d);
+        var wp = p.state === 'down' ? 0 : q.state === 'down' ? 1 : 0.5, wq = 1 - wp;
+        if (p.state === 'down' && q.state === 'down') { wp = wq = 0.5; }
+        movePed(p, -dx / d * push * wp, -dy / d * push * wp); movePed(q, dx / d * push * wq, dy / d * push * wq);
+      }
+    }
+    p.__d = true;
+  }
+  for (i = 0; i < peds.length; i++) peds[i].__d = false;
+  // joueur à pied contre piétons
+  if (!P.car) {
+    var pr = 9, ps = Math.hypot(P.vx, P.vy);
+    gx = Math.floor(P.x / GRID); gy = Math.floor(P.y / GRID);
+    for (var cy2 = gy - 1; cy2 <= gy + 1; cy2++) for (var cx2 = gx - 1; cx2 <= gx + 1; cx2++) {
+      list = pgrid[cx2 + ',' + cy2]; if (!list) continue;
+      for (j = 0; j < list.length; j++) {
+        q = list[j]; dx = q.x - P.x; dy = q.y - P.y; d = Math.hypot(dx, dy); var rr3 = q.state === 'down' ? pr + 5 : pr + PR;
+        if (d >= rr3 || d < 0.01) continue;
+        push = rr3 - d;
+        movePed(q, dx / d * push * 0.75, dy / d * push * 0.75);
+        P.x -= dx / d * push * 0.25; P.y -= dy / d * push * 0.25;
+        if (q.state === 'walk' && ps > 90 && !q.bumpT) { q.state = 'flee'; q.t = 1.2; q.a = Math.atan2(dy, dx); q.bumpT = 1; }
+      }
+    }
+    var hw = pushCircle(P.x, P.y, 9); if (hw) { P.x += hw.nx * hw.pen; P.y += hw.ny * hw.pen; }
+  }
+  // piétons contre voitures (lentes ou arrêtées) : on les contourne au lieu de les traverser
+  for (i = 0; i < cars.length; i++) {
+    var c = cars[i]; if (c.speed > 45 && !c.dead) continue;
+    var sh = carShape(c); gx = Math.floor(c.x / GRID); gy = Math.floor(c.y / GRID);
+    for (var cy3 = gy - 2; cy3 <= gy + 2; cy3++) for (var cx3 = gx - 2; cx3 <= gx + 2; cx3++) {
+      list = pgrid[cx3 + ',' + cy3]; if (!list) continue;
+      for (j = 0; j < list.length; j++) {
+        q = list[j];
+        for (k = 0; k < 3; k++) {
+          dx = q.x - sh[k][0]; dy = q.y - sh[k][1]; d = Math.hypot(dx, dy);
+          if (d < 12 + PR && d > 0.01) { movePed(q, dx / d * (12 + PR - d), dy / d * (12 + PR - d)); if (q.state === 'walk') q.a = Math.atan2(dy, dx) + (Math.random() - 0.5); }
+        }
+      }
+    }
+  }
+  for (i = 0; i < peds.length; i++) if (peds[i].bumpT) { peds[i].bumpT -= dt; if (peds[i].bumpT <= 0) peds[i].bumpT = 0; }
+}
+function movePed(p, mx, my) {
+  if (!mx && !my) return;
+  var nx = p.x + mx, ny = p.y + my;
+  if (pedOk(nx, ny)) { p.x = nx; p.y = ny; }
+  else if (pedOk(nx, p.y)) p.x = nx;
+  else if (pedOk(p.x, ny)) p.y = ny;
+}
+
 /* ---------- joueur ---------- */
 function nearestCar(r) {
   var b = null, bd = r;
@@ -725,7 +796,7 @@ function updateGame(dt) {
   for (i = 0; i < cars.length; i++) for (var j = i + 1; j < cars.length; j++) {
     if (dist(cars[i].x, cars[i].y, P.x, P.y) < 1200) collideCars(cars[i], cars[j]);
   }
-  updatePeds(dt); updatePickups(dt); updateMission(dt); manageTraffic(dt);
+  updatePeds(dt); resolvePeople(dt); updatePickups(dt); updateMission(dt); manageTraffic(dt);
   // recherche : décroissance, arrestation
   var copNear = false, copClose = 0;
   cars.forEach(function (c) { if (c.role === 'cop' && !c.dead) { var d = dist(c.x, c.y, P.x, P.y); if (d < 480) copNear = true; if (d < 70) copClose++; } });

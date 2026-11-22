@@ -49,7 +49,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#000;font-family:-appl
 <canvas id="c"></canvas>
 <div id="menu"><h1>RUE NOIRE</h1><div class="by">Développé par Benoit Rousseaux</div>
 <button class="btn" id="play">JOUER</button><button class="btn" id="q">Graphismes</button></div>
-<div id="ver">Version 9.1</div>
+<div id="ver">Version 9.2</div>
 <div id="hud"><div id="tl"><div id="money"></div><div id="hp"><div id="hpbar"></div></div><div id="ammo"></div></div>
 <button class="btn" id="bP">❚❚ Pause</button>
 <div id="tr"><canvas id="mm" width="170" height="170"></canvas><div id="stars"></div><div id="clock"></div></div>
@@ -87196,8 +87196,8 @@ function drawMinimap() {
   if (copHeli) dot(copHeli.x, copHeli.z, '#ff3030', 4);
   mmx.restore();
   // icônes fixes (projetées et bornées au bord)
-  function icon(wx, wz, txt, col) { const dx = (wx - px) / MM.S * zoom, dz = (wz - pz) / MM.S * zoom, c = Math.cos(th), s = Math.sin(th); let ix = dx * c - dz * s, iz = dx * s + dz * c; const d = Math.hypot(ix, iz), m = R2 - 12; if (d > m) { ix *= m / d; iz *= m / d; } mmx.font = 'bold 13px sans-serif'; mmx.textAlign = 'center'; mmx.textBaseline = 'middle'; mmx.fillStyle = col; mmx.fillText(txt, R2 + ix, R2 + iz); }
-  icon(MARINA.x, MARINA.z, '⚓', '#ffffff'); icon(SHOP.door[0], SHOP.door[1], '⌖', '#ff5050'); icon(STATION.x, STATION.z - 15, 'P', '#5a8cff'); icon((AIRPORT.x0 + AIRPORT.x1) / 2, AIRPORT.z1 - 60, '✈', '#ffffff');
+  function icon(wx, wz, txt, col, bg) { const dx = (wx - px) / MM.S * zoom, dz = (wz - pz) / MM.S * zoom, c = Math.cos(th), s = Math.sin(th); let ix = dx * c - dz * s, iz = dx * s + dz * c; const d = Math.hypot(ix, iz), m = R2 - 12; if (d > m) { ix *= m / d; iz *= m / d; } mmx.font = bg ? 'bold 10px sans-serif' : 'bold 13px sans-serif'; mmx.textAlign = 'center'; mmx.textBaseline = 'middle'; if (bg) { const w = mmx.measureText(txt).width + 8; mmx.fillStyle = bg; mmx.beginPath(); if (mmx.roundRect) mmx.roundRect(R2 + ix - w / 2, R2 + iz - 8, w, 16, 5); else mmx.rect(R2 + ix - w / 2, R2 + iz - 8, w, 16); mmx.fill(); mmx.strokeStyle = col; mmx.lineWidth = 1.2; mmx.stroke(); } mmx.fillStyle = col; mmx.fillText(txt, R2 + ix, R2 + iz); }
+  icon(MARINA.x, MARINA.z, '⚓', '#ffffff'); icon(DSNT.x, DSNT.z, 'DSN', '#9fd4ff', 'rgba(10,30,60,0.85)'); icon(SHOP.door[0], SHOP.door[1], '⌖', '#ff5050'); icon(STATION.x, STATION.z - 15, 'P', '#5a8cff'); icon((AIRPORT.x0 + AIRPORT.x1) / 2, AIRPORT.z1 - 60, '✈', '#ffffff');
   if (mission && mission.tgt) icon(mission.tgt[0], mission.tgt[1], '●', '#ffd60a');
   // joueur
   mmx.save(); mmx.translate(R2, R2); mmx.rotate(a + th); mmx.fillStyle = '#ffd60a'; mmx.beginPath(); mmx.moveTo(8, 0); mmx.lineTo(-6, 5); mmx.lineTo(-3, 0); mmx.lineTo(-6, -5); mmx.closePath(); mmx.fill(); mmx.restore();

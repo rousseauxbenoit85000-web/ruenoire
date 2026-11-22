@@ -30,6 +30,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#000;font-family:-appl
 #obj{position:absolute;left:50%;top:14px;transform:translateX(-50%);background:rgba(0,0,0,.55);padding:7px 16px;border-radius:10px;font-size:15px;font-weight:700;color:#ffd60a;display:none;max-width:60vw;text-align:center}
 #radio{position:absolute;left:14px;bottom:20px;font-size:14px;font-weight:700;background:rgba(0,0,0,.45);padding:6px 12px;border-radius:999px;pointer-events:auto;cursor:pointer;display:none}
 #banner{position:absolute;left:0;right:0;top:32%;text-align:center;font-size:44px;font-weight:900;letter-spacing:.06em;opacity:0;transition:opacity .4s}#banner small{display:block;font-size:17px;font-weight:600;color:#fff;letter-spacing:0;margin-top:6px}
+#bubble{position:fixed;transform:translate(-50%,-100%);background:#fff;color:#111;font-weight:700;font-size:17px;padding:9px 15px;border-radius:16px;box-shadow:0 4px 18px rgba(0,0,0,.45);opacity:0;pointer-events:none;white-space:normal;max-width:min(80vw,340px);text-align:center;z-index:5}#bubble:after{content:"";position:absolute;left:50%;bottom:-9px;margin-left:-9px;border:9px solid transparent;border-bottom:0;border-top-color:#fff}
 #toast{position:absolute;left:0;right:0;top:46%;text-align:center;font-size:20px;font-weight:800;opacity:0;transition:opacity .3s}
 #bP{position:absolute;left:14px;top:96px;pointer-events:auto;padding:6px 14px;font-size:14px}
 #help{position:absolute;left:14px;bottom:56px;font-size:12px;opacity:.7;max-width:46vw}
@@ -48,11 +49,11 @@ html,body{margin:0;height:100%;overflow:hidden;background:#000;font-family:-appl
 <canvas id="c"></canvas>
 <div id="menu"><h1>RUE NOIRE</h1><div class="by">Développé par Benoit Rousseaux</div>
 <button class="btn" id="play">JOUER</button><button class="btn" id="q">Graphismes</button></div>
-<div id="ver">Version 9</div>
+<div id="ver">Version 9.1</div>
 <div id="hud"><div id="tl"><div id="money"></div><div id="hp"><div id="hpbar"></div></div><div id="ammo"></div></div>
 <button class="btn" id="bP">❚❚ Pause</button>
 <div id="tr"><canvas id="mm" width="170" height="170"></canvas><div id="stars"></div><div id="clock"></div></div>
-<div id="obj"></div><div id="banner"></div><div id="toast"></div><div id="speed"></div><div id="hint"></div><div id="radio"></div>
+<div id="obj"></div><div id="banner"></div><div id="toast"></div><div id="bubble"></div><div id="speed"></div><div id="hint"></div><div id="radio"></div>
 <div id="help">ZQSD : bouger · Maj : courir · Espace : sauter · F ou clic : tirer · 1-8 / Tab / molette : arme · E : véhicule · R : radio · P : pause · glisser : caméra</div></div>
 <div id="touch"><div class="tb" id="bE">ACTION</div><div class="tb" id="bA">TIR</div><div class="tb" id="bB">SAUT</div><div class="tb" id="bR">COURIR</div><div class="tb" id="bW2">ARME</div></div>
 <div id="shop"><div class="sp"><div class="sh"><h2>ARMURERIE</h2><span id="shopMoney"></span></div><div id="shopList"></div><button class="btn" id="shopClose">Fermer</button></div></div>
@@ -86440,7 +86441,7 @@ function chaseAI(c, dt) {
   }
   const want = Math.atan2(wz - c.z, wx - c.x); let df = ((want - c.a + Math.PI) % TAU + TAU) % TAU - Math.PI;
   if (c.rev > 0) { c.rev -= dt; c.speed = lerp(c.speed, -8, dt * 3); c.steer = -Math.sign(df) * 0.5; }
-  else { c.steer = clamp(df * 1.6, -0.6, 0.6); const top = Math.min(c.m.t.max * 0.92, 46) * (d < 14 ? 0.4 : 1); c.speed = lerp(c.speed, top * (1 - Math.min(0.7, Math.abs(df) * 0.6)), dt * 1.2); }
+  else { c.steer = clamp(df * 1.6, -0.6, 0.6); const pv = player.veh ? Math.abs(player.veh.speed) : 0, cap = player.veh ? Math.max(15, Math.min(28, pv + 4)) : 12, top = Math.min(c.m.t.max * 0.7, cap) * (d < 25 ? 0.45 : 1); c.speed = lerp(c.speed, top * (1 - Math.min(0.7, Math.abs(df) * 0.6)), dt * 0.6); }
   c.a += Math.tan(c.steer) * c.speed / c.m.t.wb * dt;
   const nx = c.x + Math.cos(c.a) * c.speed * dt, nz = c.z + Math.sin(c.a) * c.speed * dt;
   if (hitBox(nx, nz, 1.2, 1)) { c.speed *= -0.3; c.stuck = (c.stuck || 0) + 1; if (c.stuck > 8) { c.rev = 0.9; c.stuck = 0; } } else { c.x = nx; c.z = nz; }
@@ -86465,18 +86466,18 @@ function respawn() {
 function addMoney(n) { player.money += n; moneyFlash = 1.5; }
 let moneyFlash = 0;
 /* recherche */
-function setHeat(h) { h = clamp(h, 0, 5); if (h > player.heat) player.heatT = 0; player.heat = h; }
+function setHeat(h) { h = clamp(h, 0, 5); if (h > player.heat) { player.heatT = 0; if (player.heat === 0) spawnCopT = Math.max(spawnCopT, 7); } player.heat = h; }
 function crime(n) { setHeat(Math.max(player.heat, 0) + n); player.heatT = 0; }
 const COPS = [];
 let copHeli = null, spawnCopT = 0;
 function copCount() { return COPS.filter(c => !c.dead).length; }
 function spawnCop() {
   const ds = Math.hypot(STATION.gateX - player.x, STATION.gateZ - player.z);
-  if (ds > 120 && ds < 450 && R() < 0.5) { const v = addVehicle(R() < 0.35 ? makeBike('moto', 0xf4f4f4, null, true) : makeCar('police', 0xf4f4f4), { ai: true, role: 'cop', driver: true, mode: 'chase', x: STATION.gateX, z: STATION.gateZ + 4, a: Math.PI / 2, fireT: 1 + R() }); COPS.push(v); STATION.open = 3; return v; }
+  if (ds > 200 && ds < 450 && R() < 0.5) { const v = addVehicle(R() < 0.35 ? makeBike('moto', 0xf4f4f4, null, true) : makeCar('police', 0xf4f4f4), { ai: true, role: 'cop', driver: true, mode: 'chase', x: STATION.gateX, z: STATION.gateZ + 4, a: Math.PI / 2, fireT: 1 + R() }); COPS.push(v); STATION.open = 3; return v; }
   // à un noeud de la grille à 150-260 m du joueur
   for (let tries = 0; tries < 20; tries++) {
     const k = Math.floor(R() * (NB + 1)), m = Math.floor(R() * (NB + 1)), np = nodePos(k, m), d = Math.hypot(np[0] - player.x, np[1] - player.z);
-    if (d < 140 || d > 320) continue;
+    if (d < 220 || d > 380) continue;
     const v = addVehicle(R() < 0.35 ? makeBike('moto', 0xf4f4f4, null, true) : makeCar('police', 0xf4f4f4), { ai: true, role: 'cop', driver: true, mode: 'chase', x: np[0], z: np[1], a: Math.atan2(player.z - np[1], player.x - np[0]), fireT: 1 + R() });
     COPS.push(v); return v;
   }
@@ -86491,7 +86492,7 @@ function updatePolice(dt) {
   // effectifs
   const want = h === 0 ? 0 : Math.min(6, 1 + h);
   spawnCopT -= dt;
-  if (copCount() < want && spawnCopT <= 0) { spawnCop(); spawnCopT = 4; }
+  if (copCount() < want && spawnCopT <= 0) { spawnCop(); spawnCopT = 9; }
   for (let i = COPS.length - 1; i >= 0; i--) { const c = COPS[i]; const far = Math.hypot(c.x - player.x, c.z - player.z); if ((h === 0 && far > 160 && c.mode !== 'patrol') || (c.dead && c.wreckT > 20) || far > 600) { if (c === player.veh) continue; removeVehicle(c); COPS.splice(i, 1); } }
   if (h === 0) { COPS.forEach(c => { if (!c.dead && c !== player.veh && c.mode === 'chase') c.mode = 'idle'; }); if (COPS.filter(c => c.mode === 'patrol').length < 2 && spawnCopT <= 0) { const v = spawnTraffic('police', 0xf4f4f4, 'cop', R() < 0.5 ? 'out' : 'city'); v.mode = 'patrol'; COPS.push(v); spawnCopT = 8; } } else COPS.forEach(c => { if (!c.dead && c !== player.veh) c.mode = 'chase'; });
   // tirs de la police à partir de 2 étoiles
@@ -86506,7 +86507,7 @@ function updatePolice(dt) {
     if (h < 3 && !c.dead) { c.leave = true; }
     if (!c.dead) {
       const tx = c.leave ? player.x + 900 : player.x + Math.cos(clock * 0.3) * 35, tz = c.leave ? player.z + 900 : player.z + Math.sin(clock * 0.3) * 35, d = Math.hypot(tx - c.x, tz - c.z);
-      const want = Math.atan2(tz - c.z, tx - c.x); c.a = lerpAng(c.a, want, clamp(dt * 1.5, 0, 1)); const sp = Math.min(40, d * 0.8); c.x += Math.cos(c.a) * sp * dt; c.z += Math.sin(c.a) * sp * dt;
+      const want = Math.atan2(tz - c.z, tx - c.x); c.a = lerpAng(c.a, want, clamp(dt * 1.5, 0, 1)); const sp = Math.min(22, d * 0.6); c.x += Math.cos(c.a) * sp * dt; c.z += Math.sin(c.a) * sp * dt;
       c.y = lerp(c.y, Math.max(45, floorAt(c.x, c.z) + 30), dt * 0.8); c.speed = sp;
       const sl = c.m.spot; sl.position.set(c.x, c.y, c.z); sl.target.position.set(player.x, 0, player.z); sl.intensity = night > 0.3 ? 4000 : 0;
       if (h >= 4 && state === 'play') { c.fireT -= dt; const dd = Math.hypot(c.x - player.x, c.z - player.z); if (c.fireT <= 0 && dd < 80) { c.fireT = 0.9; copShoot(c.x, c.y - 1, c.z, dd); } }
@@ -87149,7 +87150,8 @@ function updateHud(dt) {
   hud.speed.innerHTML = v ? Math.round(Math.abs(v.speed) * 3.6) + ' <small>km/h</small>' + (v.kind === 'plane' || v.kind === 'heli' ? '<br><small>Alt ' + Math.round(v.y) + ' m</small>' : '') : '';
   const ri = Snd.radioInfo(); hud.radio.style.display = v && ri.style ? 'block' : 'none'; hud.radio.textContent = '♪ Radio : ' + (ri.style === 'metal' ? 'Métal' : 'Rap') + (ri.on ? '' : ' (coupée)');
   let hint = '';
-  if (!v && nearCounter()) hint = (IS_TOUCH ? 'Touche ACTION' : 'E') + ' : acheter des armes';
+  if (!v && nearBabeth()) hint = (IS_TOUCH ? 'Touche ACTION' : 'E') + ' : dire bonjour';
+  else if (!v && nearCounter()) hint = (IS_TOUCH ? 'Touche ACTION' : 'E') + ' : acheter des armes';
   else if (!v) { const n = nearestVehicle(); if (n) hint = (IS_TOUCH ? 'Touche ACTION' : 'E') + ' : ' + (n.kind === 'boat' ? 'piloter le bateau' : n.kind === 'plane' ? "piloter l'avion" : n.kind === 'heli' ? "piloter l'hélicoptère" : n.m.type === 'velo' ? 'prendre le vélo' : n.m.type === 'moto' ? 'prendre la moto' : n.m.type === 'taxi' ? 'prendre le taxi' : 'monter dans la voiture'); }
   else if (!IS_TOUCH) hint = v.kind === 'plane' ? 'Z/S : gaz · Q/D : virer · Espace : monter · Maj : descendre · E : sortir' : v.kind === 'heli' ? 'Espace : monter · Maj : descendre · ZQSD : diriger · E : sortir' : v.kind === 'boat' ? 'ZQSD : piloter · E : descendre près du ponton' : 'E : descendre · Espace : frein à main · R : radio';
   hud.hint.textContent = hint;
@@ -87216,7 +87218,7 @@ function step(dt) {
   const lampOn = updateEnv(state === 'play' ? dt : dt * 0.3);
   const I = inp();
   if (state === 'play') {
-    if (act) { act = false; if (player.veh) exitVehicle(false); else if (nearCounter()) openShop(); else { const n = nearestVehicle(); if (n) enterVehicle(n); } }
+    if (act) { act = false; if (player.veh) exitVehicle(false); else if (nearBabeth()) talkBabeth(); else if (nearCounter()) openShop(); else { const n = nearestVehicle(); if (n) enterVehicle(n); } }
     if (keys.KeyF && WEAPONS[player.wpn].auto && !player.veh) fire();
     if (fireReq) { fireReq = false; if (!player.veh) fire(); }
     if (tbtn.a && !player.veh) fire();
@@ -87241,7 +87243,7 @@ function step(dt) {
   });
   STATION.open = Math.max(0, (STATION.open || 0) - dt); const nearGate = vehicles.some(v => v.kind === 'car' && Math.hypot(v.x - STATION.gateX, v.z - STATION.gateZ) < 9 && Math.abs(v.speed) > 0.5); STATION.bar.rotation.z = lerp(STATION.bar.rotation.z, STATION.open > 0 || nearGate ? 1.3 : 0, clamp(dt * 3, 0, 1)); STATION.bar.position.x = STATION.x - 5 + 5 * Math.cos(STATION.bar.rotation.z); STATION.bar.position.y = 1.1 + 5 * Math.sin(STATION.bar.rotation.z);
   STATION.signMat.emissiveIntensity = 0.4 + lampOn * 1.6; STATION.lampMat.emissiveIntensity = 0.5 + lampOn * 2.5;
-  GUARDS.forEach(p => { p.g.visible = Math.hypot(p.g.position.x - camera.position.x, p.g.position.z - camera.position.z) < 140; if (p.g.visible) animPerson(p, 0, dt, false, player.heat >= 2 && Math.hypot(player.x - STATION.x, player.z - STATION.z) < 40); });
+  GUARDS.forEach(p => { p.g.visible = Math.hypot(p.g.position.x - camera.position.x, p.g.position.z - camera.position.z) < 140; if (p.g.visible) animPerson(p, 0, dt, false, !p.isRecep && player.heat >= 2 && Math.hypot(player.x - STATION.x, player.z - STATION.z) < 40); }); updateBabeth(dt);
   const v = player.veh, sirenOn = COPS.some(c => !c.dead && c.mode === 'chase' && Math.hypot(c.x - player.x, c.z - player.z) < 150);
   Snd.update(v ? Math.abs(v.speed) * 3.6 * (v.kind === 'car' ? 1 : 0.6) : 0, !!v, sirenOn ? 1 : 0, 0);
   if (state === 'play' || state === 'dead') updateHud(dt);
@@ -87303,11 +87305,42 @@ const GUARDS = [];
 [[DSNT.doorX - 4.2, DSNT.front + 3.2], [DSNT.doorX + 4.2, DSNT.front + 3.2]].forEach(function (q) { const p = makePerson({ skin: SKIN[Math.floor(R() * 5)], outfit: 'suit', top: 0x111216, pants: 0x111216, tie: 0x111111, hair: HAIR[0], hairStyle: 'buzz', glasses: true, shoe: 0x111111, sole: 0x111111 }); p.g.position.set(q[0], 0.16, q[1]); p.g.rotation.y = -Math.PI / 2; GUARDS.push(p); });
 { const k = makePerson({ skin: SKIN[2], outfit: 'jacket', top: 0x3a3226, inner: 0x6a7a4a, pants: 0x3a3a2a, hair: HAIR[4], hairStyle: 'bald', beard: true, glasses: false, shoe: 0x3a2a1a }); k.g.position.set(SHOP.keeperPos[0], SHOP.keeperPos[1], SHOP.keeperPos[2]); k.g.rotation.y = 0; GUARDS.push(k); }
 setWeapon('pistolet');
-{ const rec = randomPerson(false); rec.g.position.set(DSNT.recPos[0], DSNT.recPos[1], DSNT.recPos[2]); rec.g.rotation.y = -Math.PI / 2; GUARDS.push(rec); }
+const RX = DSNT.recPos;
+const BABETH = makePerson({ fem: true, skin: SKIN[0], outfit: 'suit', top: 0x1c2a44, inner: 0xf4f4f2, pants: 0x1c2a44, skirt: true, tights: 0x2a2224, hair: 0xf0d27a, hairStyle: 'long', eyes: 0x2c5a8a, shoe: 0x111111, sole: 0x111111 });
+const GREG = makePerson({ skin: SKIN[1], outfit: 'longsleeve', top: 0x2f62b8, inner: 0x2f62b8, pants: 0x2a2c33, hair: 0x9a9a96, hairStyle: 'short', eyes: 0x3a2a1c, shoe: 0x2a1c12, sole: 0x2a1c12 });
+const PHILIPPE = makePerson({ skin: SKIN[0], outfit: 'longsleeve', top: 0x8a8c90, inner: 0x8a8c90, pants: 0x1e2026, hair: 0x6b4423, hairStyle: 'bald', eyes: 0x2c4a6a, shoe: 0x111111, sole: 0x111111 });
+const OLIVIER = makePerson({ skin: SKIN[1], outfit: 'longsleeve', top: 0xb8222a, inner: 0xb8222a, pants: 0x1e2026, hair: 0x0e0c0b, hairStyle: 'short', beard: true, beardCol: 0x0e0c0b, eyes: 0x3a2a1c, shoe: 0x111111, sole: 0x111111 });
+const RECEP = [{ p: OLIVIER, name: 'Olivier', x: RX[0] - 2.7, pitch: 1.0, fem: false, say: 'Ola !!! Moi c\'est ORA !! Arrêtez de racasser, et prenez le ramasse-bourrier !' },
+  { p: BABETH, name: 'Babeth', x: RX[0] - 0.9, pitch: 1.25, fem: true, say: 'Bonjour, je m\'appelle Babeth, bienvenue à la DSN Tower' },
+  { p: PHILIPPE, name: 'Philippe', x: RX[0] + 0.9, pitch: 0.95, fem: false, say: 'Demat Deoc\'h, moi c\'est Philippe ! Bienvenue à la DSN Tower' },
+  { p: GREG, name: 'Greg', x: RX[0] + 2.7, pitch: 0.85, fem: false, say: 'Bonjour, je m\'appelle Greg, bienvenue à la DSN Tower' }];
+RECEP.forEach(r => { r.p.g.position.set(r.x, RX[1], RX[2]); r.p.g.rotation.y = -Math.PI / 2; r.p.isRecep = true; r.talkT = 0; GUARDS.push(r.p); });
+function nearRecep() { if (player.veh || Math.abs(player.y - RX[1]) > 1) return null; let best = null, bd = 3.4; for (const r of RECEP) { const d = Math.hypot(player.x - r.x, player.z - (RX[2] + 3)); if (d < bd) { bd = d; best = r; } } return best; }
+function nearBabeth() { return !!nearRecep(); }
+function talkRecep(r) {
+  r = r || nearRecep() || RECEP[0]; RECEP.forEach(o => { if (o !== r) o.talkT = 0; }); r.talkT = 4.5;
+  const t = r.say, b = $('bubble'); b.textContent = t; b.style.opacity = 1;
+  try { if (window.speechSynthesis) { const u = new SpeechSynthesisUtterance(t); u.lang = 'fr-FR'; u.pitch = r.pitch; const vs = speechSynthesis.getVoices().filter(v => /^fr/i.test(v.lang)); const re = r.fem ? /female|femme|amelie|audrey|marie|julie|virginie|denise|hortense|google/i : /male|homme|thomas|henri|paul|claude|nicolas|daniel/i; const fv = vs.find(v => re.test(v.name)) || vs[0]; if (fv) u.voice = fv; speechSynthesis.cancel(); speechSynthesis.speak(u); } } catch (e) {}
+}
+function talkBabeth() { talkRecep(); }
+function updateBabeth(dt) {
+  const b = $('bubble'); let any = false;
+  for (const r of RECEP) {
+    const P = r.p, dx = player.x - r.x, dz = player.z - RX[2], close = Math.hypot(dx, dz) < 9 && Math.abs(player.y - RX[1]) < 1;
+    const tgt = close ? -Math.atan2(dz, dx) : -Math.PI / 2; let d = ((tgt - P.g.rotation.y + Math.PI) % TAU + TAU) % TAU - Math.PI; P.g.rotation.y += d * Math.min(1, dt * 4);
+    if (r.talkT > 0) {
+      any = true; r.talkT -= dt; const a = P.L[1]; a.ua.rotation.x = -2.5; a.ua.rotation.z = 0.2; a.fa.rotation.z = 0.5 + Math.sin(clock * 12) * 0.45;
+      const v = new T.Vector3(r.x, RX[1] + 2.15, RX[2]).project(camera);
+      if (v.z < 1) { b.style.left = clamp((v.x + 1) / 2 * innerWidth, Math.min(innerWidth / 2, b.offsetWidth / 2 + 8), Math.max(innerWidth / 2, innerWidth - b.offsetWidth / 2 - 8)) + 'px'; b.style.top = ((1 - v.y) / 2 * innerHeight) + 'px'; }
+      b.style.opacity = r.talkT > 0.4 ? 1 : Math.max(0, r.talkT / 0.4);
+    }
+  }
+  if (!any) b.style.opacity = 0;
+}
 for (let i = 0; i < (HIGH ? 75 : 40); i++) spawnPed();
 spawnAnimals(); spawnPickups();
 updateEnv(0);
-window.__g = { SHOP, nearCounter, openShop, WEAPONS, setWeapon, CASH, setCam: function (y) { camYaw = y; }, step, render: function () { composer.render(); }, setHour: function (h) { hour = h; lastEnvT = -1; }, wx: function (n) { WX.force = n; const t = WXT[n]; WX.cloud = t[0]; WX.rain = t[1]; WX.fog = t[2]; lastEnvT = -1; }, start: startGame, player, vehicles, camera, renderer, scene, keys, act: function () { act = true; }, fire: function () { fireReq = true; }, heat: setHeat, NPCS: function () { return NPCS; }, get state() { return state; }, DSNT, AIRPORT, MARINA, enter: enterVehicle, mission: function () { return mission; }, startMission: function (i) { startMission(PHONES[i]); } };
+window.__g = { RECEP, talkRecep, DSNT, nearBabeth, talkBabeth, crime, SHOP, nearCounter, openShop, WEAPONS, setWeapon, CASH, setCam: function (y) { camYaw = y; }, step, render: function () { composer.render(); }, setHour: function (h) { hour = h; lastEnvT = -1; }, wx: function (n) { WX.force = n; const t = WXT[n]; WX.cloud = t[0]; WX.rain = t[1]; WX.fog = t[2]; lastEnvT = -1; }, start: startGame, player, vehicles, camera, renderer, scene, keys, act: function () { act = true; }, fire: function () { fireReq = true; }, heat: setHeat, NPCS: function () { return NPCS; }, get state() { return state; }, DSNT, AIRPORT, MARINA, enter: enterVehicle, mission: function () { return mission; }, startMission: function (i) { startMission(PHONES[i]); } };
 if (!window.__noloop) requestAnimationFrame(frame);
 })();
 </script>

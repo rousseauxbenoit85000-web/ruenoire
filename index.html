@@ -86018,16 +86018,62 @@ const BG = {
   sph: new T.SphereGeometry(1, 18, 14), sphLo: new T.SphereGeometry(1, 10, 8), cyl: new T.CylinderGeometry(1, 1, 1, 14), box: new T.BoxGeometry(1, 1, 1),
   rbox: new A.RoundedBoxGeometry(1, 1, 1, 3, 0.25), cone: new T.CylinderGeometry(0.62, 1, 1, 20, 1, true),
   hairCap: new T.SphereGeometry(1, 20, 12, 0, TAU, 0, Math.PI * 0.56), hairBuzz: new T.SphereGeometry(1, 18, 10, 0, TAU, 0, Math.PI * 0.48),
-  beard: new T.SphereGeometry(1, 16, 10, -Math.PI * 0.42, Math.PI * 0.84, Math.PI * 0.55, Math.PI * 0.33),
+
   hood: new T.SphereGeometry(1, 16, 10, Math.PI * 0.5, Math.PI, Math.PI * 0.3, Math.PI * 0.5),
   torus: new T.TorusGeometry(1, 0.08, 6, 24),
   afro: (function () { const g = new T.IcosahedronGeometry(1, 2), p = g.attributes.position; for (let v = 0; v < p.count; v++) { const f = 1 + (hash2(Math.round(p.getX(v) * 40), Math.round(p.getY(v) * 40) + Math.round(p.getZ(v) * 17), 5) - 0.5) * 0.14; p.setXYZ(v, p.getX(v) * f, p.getY(v) * f, p.getZ(v) * f); } g.computeVertexNormals(); return g; })(),
-  head: (function () { const g = new T.SphereGeometry(1, 24, 18), p = g.attributes.position; for (let v = 0; v < p.count; v++) { let x = p.getX(v), y = p.getY(v), z = p.getZ(v); if (y < 0) { const k = 1 + y * 0.28; z *= k; x = x * (1 + y * 0.12) + (y < -0.3 ? 0.04 : 0); } if (x > 0.3 && y > -0.2 && y < 0.45) x *= 0.97; p.setXYZ(v, x, y, z); } g.computeVertexNormals(); return g; })(),
+  head: (function () {
+    const g = new T.SphereGeometry(1, 32, 24), p = g.attributes.position, gs = (v, c, w) => Math.exp(-((v - c) / w) * ((v - c) / w));
+    for (let v = 0; v < p.count; v++) {
+      let x = p.getX(v), y = p.getY(v), z = p.getZ(v); const fr = Math.max(0, x);
+      // crâne : légèrement plus long d'avant en arrière, tempes aplaties
+      z *= 0.9 - 0.06 * gs(y, 0.25, 0.35);
+      if (x < 0) x *= 1.06;
+      // mâchoire : se rétrécit vers le menton, angle de mâchoire marqué
+      if (y < -0.05) { const t = Math.min(1, (-y - 0.05) / 0.95); z *= 1 - 0.42 * t * t - 0.1 * t * fr; x = x * (1 - 0.18 * t) + (x > 0 ? 0.1 * t * fr : 0.04 * t); if (x < -0.2) x = -0.2 + (x + 0.2) * (1 - 0.5 * t); }
+      // visage plus plat à l'avant
+      if (x > 0.5) x = 0.5 + (x - 0.5) * 0.62;
+      // arcade sourcilière, pommettes, orbites
+      if (x > 0.35) {
+        x += 0.05 * gs(y, 0.24, 0.07) * gs(Math.abs(z), 0.3, 0.32);
+        x -= 0.045 * gs(y, 0.12, 0.08) * gs(Math.abs(z), 0.33, 0.12);
+        z *= 1 + 0.05 * gs(y, -0.08, 0.12);
+      }
+      // menton
+      x += 0.06 * gs(y, -0.82, 0.12) * Math.max(0, x) * gs(z, 0, 0.3);
+      p.setXYZ(v, x, y, z);
+    }
+    g.computeVertexNormals(); return g;
+  })(),
   torsoM: (function () { const prof = [[0.001, -0.02], [0.15, -0.02], [0.155, 0.08], [0.148, 0.18], [0.16, 0.3], [0.185, 0.42], [0.2, 0.52], [0.19, 0.6], [0.12, 0.665], [0.06, 0.69], [0.001, 0.695]]; return new T.LatheGeometry(prof.map(p => new T.Vector2(p[0], p[1])), 22); })(),
   torsoF: (function () { const prof = [[0.001, -0.02], [0.16, -0.02], [0.155, 0.08], [0.128, 0.2], [0.138, 0.3], [0.168, 0.4], [0.165, 0.5], [0.165, 0.58], [0.11, 0.65], [0.055, 0.68], [0.001, 0.685]]; return new T.LatheGeometry(prof.map(p => new T.Vector2(p[0], p[1])), 22); })(),
   limb: function (len, r0, r1) { const k = 'L' + len + '_' + r0 + '_' + r1; if (limbGeo[k]) return limbGeo[k]; const c = new T.CylinderGeometry(r1, r0, len, 12, 1, true); c.translate(0, -len / 2, 0); const s0 = new T.SphereGeometry(r0, 12, 8); const s1 = new T.SphereGeometry(r1, 12, 8); s1.translate(0, -len, 0); return (limbGeo[k] = A.mergeGeometries([c.toNonIndexed(), s0.toNonIndexed(), s1.toNonIndexed()].map(g => { g.deleteAttribute('uv'); return g; }))); }
 };
 const LIPS = 0xa8584f, EYEW = 0xf4f1ec, BROW = 0x2a1c14;
+/* coques conformes à la tête (cheveux, barbe) */
+function headShell(pred, off) {
+  const src = BG.head.index ? BG.head.toNonIndexed() : BG.head.clone(), sp = src.attributes.position, sn = src.attributes.normal, out = [];
+  for (let t = 0; t < sp.count; t += 3) {
+    let cx = 0, cy = 0, cz = 0; for (let k = 0; k < 3; k++) { cx += sp.getX(t + k) / 3; cy += sp.getY(t + k) / 3; cz += sp.getZ(t + k) / 3; }
+    const e = pred(cx, cy, cz); if (e === false || e === 0) continue;
+    const d = typeof e === 'number' ? e : off;
+    for (let k = 0; k < 3; k++) out.push(sp.getX(t + k) + sn.getX(t + k) * d, sp.getY(t + k) + sn.getY(t + k) * d, sp.getZ(t + k) + sn.getZ(t + k) * d);
+  }
+  const g = new T.BufferGeometry(); g.setAttribute('position', new T.Float32BufferAttribute(out, 3)); g.computeVertexNormals(); return g;
+}
+const hairLine = (x) => x > 0.35 ? 0.42 : x > -0.25 ? 0.42 - (0.35 - x) / 0.6 * 0.38 : -0.5;
+BG.hairShort = headShell((x, y, z) => y > hairLine(x) && !(Math.abs(z) > 0.6 && y < 0.25 && x > -0.25) ? 0.07 + Math.max(0, y) * 0.06 : false);
+BG.hairBuzz2 = headShell((x, y, z) => y > hairLine(x) + 0.03 && !(Math.abs(z) > 0.6 && y < 0.25 && x > -0.25) ? 0.025 : false);
+BG.hairLongTop = headShell((x, y, z) => y > hairLine(x) - 0.02 ? 0.08 + Math.max(0, y) * 0.04 : (x < 0.05 && y > -0.75 ? 0.08 : false));
+BG.beard = headShell((x, y, z) => {
+  const az = Math.abs(z);
+  const mouth = x > 0.35 && y < -0.38 && y > -0.53 && az < 0.25;
+  if (mouth) return false;
+  const must = x > 0.35 && y <= -0.28 && y >= -0.38 && az < 0.3;
+  const side = az > 0.62 && x > -0.3 && x < 0.2 && y < 0.12;
+  const lower = x > -0.28 && y < -0.24 - (az < 0.35 ? 0 : 0.0) && (y < -0.38 || az > 0.25 || must);
+  return (must || side || lower) ? (y < -0.6 ? 0.06 : 0.04) : false;
+});
 function makePerson(opt) {
   const fem = !!opt.fem, sk = opt.skin, top = opt.top, pants = opt.pants, hair = opt.hair, shoe = opt.shoe || 0x1c1c20, sole = opt.sole || 0xe8e8e4;
   const out = opt.outfit || 'tshirt', swim = out === 'swim';
@@ -86062,23 +86108,29 @@ function makePerson(opt) {
   P.push(PC(BG.head, sk, [0, HY, 0], null, [hs * 1.02, hs * 1.16, hs * 0.94]));
   // visage
   for (const s of [-1, 1]) {
-    P.push(PC(BG.sphLo, EYEW, [hs * 0.8, HY + 0.018, s * 0.038], null, [0.016, 0.013, 0.019]));
-    P.push(PC(BG.sphLo, opt.eyes || 0x3a2a1c, [hs * 0.8 + 0.01, HY + 0.018, s * 0.038], null, [0.008, 0.0095, 0.0095]));
-    P.push(PC(BG.box, fem ? hair : BROW, [hs * 0.86, HY + 0.045, s * 0.038], [s * 0.12, 0, 0], [0.008, fem ? 0.006 : 0.009, 0.034]));
-    P.push(PC(BG.sph, sk, [-0.005, HY + 0.005, s * hs * 0.93], null, [0.022, 0.034, 0.012]));
+    P.push(PC(BG.sphLo, EYEW, [hs * 0.66, HY + 0.014, s * 0.036], null, [0.014, 0.011, 0.017]));
+    P.push(PC(BG.sphLo, opt.eyes || 0x3a2a1c, [hs * 0.66 + 0.009, HY + 0.014, s * 0.036], null, [0.007, 0.0085, 0.0085]));
+    P.push(PC(BG.sphLo, sk, [hs * 0.665, HY + 0.026, s * 0.036], null, [0.0145, 0.006, 0.0185]));
+    P.push(PC(BG.box, fem ? hair : BROW, [hs * 0.74, HY + 0.04, s * 0.037], [s * 0.1, 0, fem ? 0 : -0.1], [0.008, fem ? 0.005 : 0.0085, 0.033]));
+    P.push(PC(BG.sph, sk, [-0.01, HY + 0.0, s * hs * 0.85], [s * 0.2, 0, 0], [0.02, 0.032, 0.011]));
   }
-  P.push(PC(BG.sph, sk, [hs * 0.98, HY - 0.008, 0], [0, 0, -0.35], [0.024, 0.032, 0.02]));
-  P.push(PC(BG.sph, fem ? 0xb0505a : LIPS, [hs * 0.86, HY - 0.052, 0], null, [0.012, fem ? 0.009 : 0.007, 0.032]));
+  // nez (arête + bout + narines)
+  P.push(PC(BG.box, sk, [hs * 0.73, HY - 0.002, 0], [0, 0, -0.22], [0.016, 0.05, 0.014]));
+  P.push(PC(BG.sph, sk, [hs * 0.8, HY - 0.026, 0], null, [0.014, 0.012, 0.014]));
+  for (const s of [-1, 1]) P.push(PC(BG.sphLo, sk, [hs * 0.73, HY - 0.03, s * 0.01], null, [0.01, 0.008, 0.01]));
+  // bouche
+  P.push(PC(BG.sph, fem ? 0xb0505a : LIPS, [hs * 0.66, HY - 0.052, 0], null, [0.01, fem ? 0.008 : 0.0055, 0.026]));
+  P.push(PC(BG.sph, fem ? 0xa04650 : 0x9a5048, [hs * 0.655, HY - 0.06, 0], null, [0.01, fem ? 0.0075 : 0.006, 0.022]));
   // cheveux
   const hst = opt.hairStyle || (fem ? 'long' : 'short');
   if (hst !== 'bald' && !opt.cap && opt.helmet !== 'moto') {
     if (hst === 'afro') P.push(PC(BG.afro, hair, [-0.012, HY + 0.035, 0], null, [hs * 1.32, hs * 1.22, hs * 1.3]));
-    else P.push(PC(hst === 'buzz' ? BG.hairBuzz : BG.hairCap, hair, [-0.008, HY + 0.012, 0], [0, 0, 0.18], [hs * 1.07, hs * 1.22, hs * 1.05], 0.08));
-    if (hst === 'long') { P.push(PC(BG.rbox, hair, [-0.07, HY - 0.08, 0], null, [0.07, 0.26, 0.23], 0.08)); for (const s of [-1, 1]) P.push(PC(BG.rbox, hair, [0.0, HY - 0.06, s * 0.1], null, [0.09, 0.2, 0.04], 0.08)); }
+    else P.push(PC(hst === 'buzz' ? BG.hairBuzz2 : (hst === 'long' ? BG.hairLongTop : BG.hairShort), hair, [0, HY, 0], null, [hs * 1.02, hs * 1.16, hs * 0.94], 0.1));
+    if (hst === 'long') { P.push(PC(BG.rbox, hair, [-0.075, HY - 0.1, 0], null, [0.06, 0.26, 0.2], 0.08)); for (const s of [-1, 1]) P.push(PC(BG.rbox, hair, [-0.02, HY - 0.08, s * 0.1], [0, 0, 0.08], [0.1, 0.2, 0.03], 0.08)); }
     if (hst === 'ponytail') { P.push(PC(BG.sph, hair, [-0.11, HY + 0.03, 0], null, [0.035, 0.035, 0.035])); P.push(PC(BG.cyl, hair, [-0.14, HY - 0.08, 0], [0, 0, -0.25], [0.03, 0.22, 0.03])); }
     if (hst === 'bun') P.push(PC(BG.sph, hair, [-0.07, HY + 0.12, 0], null, [0.048, 0.045, 0.048], 0.08));
   }
-  if (opt.beard) P.push(PC(BG.beard, hair, [0.005, HY - 0.005, 0], null, [hs * 1.04, hs * 1.18, hs * 1.0], 0.1));
+  if (opt.beard) P.push(PC(BG.beard, opt.beardCol || hair, [0, HY, 0], null, [hs * 1.02, hs * 1.16, hs * 0.94], 0.22));
   if (opt.helmet === 'moto') { P.push(PC(BG.sph, opt.helmetCol || 0x1a1a1e, [0, HY + 0.01, 0], null, [0.15, 0.16, 0.145])); P.push(PC(BG.sph, 0x0a0c10, [0.07, HY, 0], null, [0.09, 0.07, 0.12])); }
   else if (opt.helmet === 'bike') { P.push(PC(BG.hairCap, opt.helmetCol || 0xd02a2a, [-0.01, HY + 0.03, 0], null, [hs * 1.2, hs * 1.15, hs * 1.12], 0.05)); }
   if (opt.cap) { P.push(PC(BG.hairCap, opt.cap, [-0.004, HY + 0.02, 0], null, [hs * 1.1, hs * 1.15, hs * 1.08])); P.push(PC(BG.rbox, opt.cap, [hs * 1.05, HY + 0.05, 0], [0, 0, -0.12], [0.09, 0.012, 0.16])); }
@@ -87351,7 +87403,7 @@ function updateBabeth(dt) {
 for (let i = 0; i < (HIGH ? 75 : 40); i++) spawnPed();
 spawnAnimals(); spawnPickups();
 updateEnv(0);
-window.__g = { RECEP, talkRecep, DSNT, nearBabeth, talkBabeth, crime, SHOP, nearCounter, openShop, WEAPONS, setWeapon, CASH, setCam: function (y) { camYaw = y; }, step, render: function () { composer.render(); }, setHour: function (h) { hour = h; lastEnvT = -1; }, wx: function (n) { WX.force = n; const t = WXT[n]; WX.cloud = t[0]; WX.rain = t[1]; WX.fog = t[2]; lastEnvT = -1; }, start: startGame, player, vehicles, camera, renderer, scene, keys, act: function () { act = true; }, fire: function () { fireReq = true; }, heat: setHeat, NPCS: function () { return NPCS; }, get state() { return state; }, DSNT, AIRPORT, MARINA, enter: enterVehicle, mission: function () { return mission; }, startMission: function (i) { startMission(PHONES[i]); } };
+window.__g = { makePerson, SKIN, HAIR, RECEP, talkRecep, DSNT, nearBabeth, talkBabeth, crime, SHOP, nearCounter, openShop, WEAPONS, setWeapon, CASH, setCam: function (y) { camYaw = y; }, step, render: function () { composer.render(); }, setHour: function (h) { hour = h; lastEnvT = -1; }, wx: function (n) { WX.force = n; const t = WXT[n]; WX.cloud = t[0]; WX.rain = t[1]; WX.fog = t[2]; lastEnvT = -1; }, start: startGame, player, vehicles, camera, renderer, scene, keys, act: function () { act = true; }, fire: function () { fireReq = true; }, heat: setHeat, NPCS: function () { return NPCS; }, get state() { return state; }, DSNT, AIRPORT, MARINA, enter: enterVehicle, mission: function () { return mission; }, startMission: function (i) { startMission(PHONES[i]); } };
 if (!window.__noloop) requestAnimationFrame(frame);
 })();
 </script>
